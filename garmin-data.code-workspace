@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../garmin-data"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"makefile.configureOnOpen": false
+	}
+}
