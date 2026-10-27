@@ -1,0 +1,1 @@
+"""Garmin Trainer API package."""

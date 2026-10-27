@@ -7,6 +7,10 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+node_modules/
+dist/
+*.tsbuildinfo
+web/.firebase/
 
 # Local credentials
 .env
@@ -26,3 +30,14 @@ venv/
 # Outputs
 outputs/
 *.log
+firebase-debug.log
+
+# Terraform local state, caches, plans, and local-only configuration
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+*.tfplan
+crash.log
+infra/backend.hcl

@@ -1,0 +1,8 @@
+project_id                  = "REPLACE_WITH_GCP_PROJECT_ID"
+github_owner                = "REPLACE_WITH_GITHUB_OWNER"
+github_repo                 = "garmin-trainer"
+github_deploy_branch        = "main"
+terraform_service_account_id = "github-terraform"
+allowed_user_email            = "REPLACE_WITH_YOUR_VERIFIED_EMAIL"
+billing_account_id            = ""
+monthly_budget_usd            = 6

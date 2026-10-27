@@ -1,0 +1,97 @@
+name: Deploy application
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "api/**"
+      - "web/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.GCP_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_TERRAFORM_SERVICE_ACCOUNT: ${{ vars.GCP_TERRAFORM_SERVICE_ACCOUNT }}
+      GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
+      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+      VITE_API_BASE_URL: /api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Require deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${GCP_PROJECT_ID:?Set GitHub variable GCP_PROJECT_ID}"
+          : "${GCP_REGION:?Set GitHub variable GCP_REGION}"
+          : "${GCP_WIF_PROVIDER:?Set GitHub variable GCP_WIF_PROVIDER}"
+          : "${GCP_TERRAFORM_SERVICE_ACCOUNT:?Set GitHub variable GCP_TERRAFORM_SERVICE_ACCOUNT}"
+          : "${GAR_REPOSITORY:?Set GitHub variable GAR_REPOSITORY}"
+          : "${CLOUD_RUN_SERVICE:?Set GitHub variable CLOUD_RUN_SERVICE}"
+          : "${VITE_FIREBASE_API_KEY:?Set GitHub variable VITE_FIREBASE_API_KEY}"
+          : "${VITE_FIREBASE_AUTH_DOMAIN:?Set GitHub variable VITE_FIREBASE_AUTH_DOMAIN}"
+          : "${VITE_FIREBASE_PROJECT_ID:?Set GitHub variable VITE_FIREBASE_PROJECT_ID}"
+          : "${VITE_FIREBASE_APP_ID:?Set GitHub variable VITE_FIREBASE_APP_ID}"
+
+      - name: Authenticate to Google Cloud with WIF
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TERRAFORM_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Build and push API image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/garmin-trainer-api:${GITHUB_SHA}"
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+          docker build --platform linux/amd64 -t "$IMAGE" ./api
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy API image
+        run: >-
+          gcloud run services update "$CLOUD_RUN_SERVICE"
+          --project="$GCP_PROJECT_ID"
+          --region="$GCP_REGION"
+          --image="$IMAGE"
+          --quiet
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build and deploy PWA and Firestore rules
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          npx firebase deploy --only hosting,firestore:rules --project "$GCP_PROJECT_ID" --non-interactive
