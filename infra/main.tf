@@ -18,11 +18,7 @@ locals {
 
   terraform_runner_email = "${var.terraform_service_account_id}@${var.project_id}.iam.gserviceaccount.com"
   github_repository      = "${var.github_owner}/${var.github_repo}"
-  github_principal_set   = "principalSet://iam.googleapis.com/projects/${data.google_project.current.number}/locations/global/workloadIdentityPools/${var.wif_pool_id}/attribute.repository/${local.github_repository}"
-}
-
-data "google_project" "current" {
-  project_id = var.project_id
+  github_principal_set   = "principalSet://iam.googleapis.com/projects/${google_firebase_project.default.project_number}/locations/global/workloadIdentityPools/${var.wif_pool_id}/attribute.repository/${local.github_repository}"
 }
 
 resource "google_project_service" "required" {
@@ -40,7 +36,7 @@ resource "google_billing_budget" "project" {
   display_name    = "Garmin Trainer monthly GCP budget"
 
   budget_filter {
-    projects        = ["projects/${data.google_project.current.number}"]
+    projects        = ["projects/${google_firebase_project.default.project_number}"]
     calendar_period = "MONTH"
   }
 
@@ -175,12 +171,16 @@ resource "google_service_account" "runtime" {
   project      = var.project_id
   account_id   = "garmin-trainer-runtime"
   display_name = "Garmin Trainer Cloud Run runtime"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_project_iam_member" "runtime_firestore_user" {
   project = var.project_id
   role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.runtime.email}"
+
+  depends_on = [google_project_service.required]
 }
 
 # GitHub Actions deploys application artifacts only. Terraform infrastructure
@@ -189,24 +189,32 @@ resource "google_project_iam_member" "github_run_developer" {
   project = var.project_id
   role    = "roles/run.developer"
   member  = "serviceAccount:${local.terraform_runner_email}"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_project_iam_member" "github_firebase_hosting_admin" {
   project = var.project_id
   role    = "roles/firebasehosting.admin"
   member  = "serviceAccount:${local.terraform_runner_email}"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_project_iam_member" "github_firebase_rules_admin" {
   project = var.project_id
   role    = "roles/firebaserules.admin"
   member  = "serviceAccount:${local.terraform_runner_email}"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_project_iam_member" "github_service_usage_consumer" {
   project = var.project_id
   role    = "roles/serviceusage.serviceUsageConsumer"
   member  = "serviceAccount:${local.terraform_runner_email}"
+
+  depends_on = [google_project_service.required]
 }
 
 resource "google_artifact_registry_repository" "app" {
