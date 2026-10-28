@@ -59,6 +59,7 @@ variable "container_image" {
 variable "allowed_user_email" {
   description = "The single verified Firebase Auth email allowed to use the API."
   type        = string
+  sensitive   = true
 
   validation {
     condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.allowed_user_email))

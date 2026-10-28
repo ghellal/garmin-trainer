@@ -41,3 +41,4 @@ firebase-debug.log
 *.tfplan
 crash.log
 infra/backend.hcl
+**/backend.hcl

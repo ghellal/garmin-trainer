@@ -65,26 +65,29 @@ not a spending cap. It covers all project usage, not compute alone.
 
 ## IAM and GitHub Actions status
 
-WIF authenticates GitHub Actions as `github-terraform`. It has application
-deployment roles and remote-state access, but these alone do **not** authorize
-Terraform to provision all resources. Before dispatch, bootstrap the runner's
-infrastructure permissions in GCP IAM. The current configuration needs
-`roles/resourcemanager.projectIamAdmin`, `roles/serviceusage.serviceUsageAdmin`,
+WIF authenticates GitHub Actions as `github-terraform`. The workflow first
+applies `infra/bootstrap-iam/`, which manages the runner's infrastructure
+roles, then applies the main stack. The runner cannot grant itself its initial
+permissions: an administrator must bootstrap `roles/resourcemanager.projectIamAdmin`
+on this service account in the GCP console. This one-time role grant is not a
+Terraform apply; it is required for the pipeline to grant/manage project roles.
+If the project budget is enabled, the billing account administrator must also
+grant `roles/billing.budgets.admin` to the service account on that billing
+account.
+
+The bootstrap stack grants `roles/serviceusage.serviceUsageAdmin`,
 `roles/firebase.admin`, `roles/identitytoolkit.admin`, `roles/datastore.owner`,
 `roles/secretmanager.admin`, `roles/iam.serviceAccountAdmin`,
-`roles/artifactregistry.admin`, and `roles/run.admin`. If the optional budget is
-enabled, also grant `roles/billing.budgets.admin` on the billing account.
-
-This bootstrap IAM grant is required because the runner cannot grant itself
-permissions. Project IAM Admin is powerful and can grant other project roles:
-scope it to this project, restrict WIF to this repository and `main`, and
-require approval on the GitHub `production` environment. Do not grant project
-Owner/Editor for convenience. The current WIF account does not yet have the
-full provisioner role set, so the workflow is not ready to dispatch until an
-administrator grants the required permissions.
+`roles/artifactregistry.admin`, and `roles/run.admin`. Some of these roles allow
+the pipeline identity to access Firestore data or Secret Manager values; treat
+the WIF identity and protected workflow as highly privileged. Project IAM
+Admin can grant other project roles, so scope it to this project, restrict WIF
+to this repository and `main`, and require approval on the GitHub `production`
+environment. Do not grant project Owner/Editor for convenience.
 
 The GitHub WIF provider is restricted to this repository and the `main` branch.
 `terraform-checks.yml` validates code without GCP credentials. The deployment
-workflow is manual-only (`workflow_dispatch`) and applies the infrastructure
-plan before deploying Cloud Run, Firebase Hosting, and deny-all Firestore rules.
-No local apply is part of the process.
+workflows are manual-only (`workflow_dispatch`): first run **Bootstrap Terraform
+IAM**, then run **Apply infrastructure and deploy**. The latter applies the main
+infrastructure plan, then deploys Cloud Run, Firebase Hosting, and deny-all
+Firestore rules. No local apply is part of the process.

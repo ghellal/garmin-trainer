@@ -146,7 +146,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
     "attribute.ref"        = "assertion.ref"
   }
 
-  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.ref == 'refs/heads/${var.github_deploy_branch}'"
+  attribute_condition = "assertion.repository == '${local.github_repository}' && assertion.ref == 'refs/heads/${var.github_deploy_branch}' && assertion.event_name == 'workflow_dispatch' && assertion.environment == 'production' && assertion.workflow_ref in ['${local.github_repository}/.github/workflows/bootstrap-terraform-iam.yml@refs/heads/${var.github_deploy_branch}', '${local.github_repository}/.github/workflows/deploy.yml@refs/heads/${var.github_deploy_branch}']"
 
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"

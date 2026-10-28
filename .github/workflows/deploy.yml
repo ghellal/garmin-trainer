@@ -76,9 +76,21 @@ jobs:
           bucket = "${GCP_PROJECT_ID}-tfstate"
           prefix = "garmin-trainer"
           EOF
+          cat > infra/bootstrap-iam/backend.hcl <<EOF
+          bucket = "${GCP_PROJECT_ID}-tfstate"
+          prefix = "garmin-trainer/bootstrap-iam"
+          EOF
 
       - name: Terraform format and validate
         run: terraform fmt -check -recursive infra
+
+      - name: Bootstrap Terraform service-account permissions
+        working-directory: infra/bootstrap-iam
+        run: |
+          terraform init -input=false -backend-config=backend.hcl
+          terraform validate
+          terraform plan -input=false -out=bootstrap-iam.tfplan
+          terraform apply -input=false bootstrap-iam.tfplan
 
       - name: Plan and apply Terraform
         working-directory: infra

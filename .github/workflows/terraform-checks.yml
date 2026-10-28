@@ -84,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for directory in infra/bootstrap-state infra; do
+          for directory in infra/bootstrap-state infra/bootstrap-iam infra; do
             terraform -chdir="$directory" init -backend=false -input=false
             terraform -chdir="$directory" validate
           done
