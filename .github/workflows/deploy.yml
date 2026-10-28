@@ -1,21 +1,14 @@
-name: Deploy application
+name: Apply infrastructure and deploy
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "api/**"
-      - "web/**"
-      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
-    if: vars.GCP_DEPLOY_ENABLED == 'true'
+  apply-and-deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -23,16 +16,22 @@ jobs:
       id-token: write
     env:
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-      GCP_REGION: ${{ vars.GCP_REGION }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'europe-west1' }}
       GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
       GCP_TERRAFORM_SERVICE_ACCOUNT: ${{ vars.GCP_TERRAFORM_SERVICE_ACCOUNT }}
-      GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY }}
-      CLOUD_RUN_SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
-      VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
-      VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
-      VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
-      VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
-      VITE_API_BASE_URL: /api
+      GCP_BILLING_ACCOUNT_ID: ${{ vars.GCP_BILLING_ACCOUNT_ID }}
+      ALLOWED_USER_EMAIL: ${{ secrets.ALLOWED_USER_EMAIL }}
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_region: ${{ vars.GCP_REGION || 'europe-west1' }}
+      TF_VAR_github_deploy_branch: main
+      TF_VAR_wif_pool_id: github-actions
+      TF_VAR_wif_provider_id: github
+      TF_VAR_terraform_service_account_id: github-terraform
+      TF_VAR_allowed_user_email: ${{ secrets.ALLOWED_USER_EMAIL }}
+      TF_VAR_billing_account_id: ${{ vars.GCP_BILLING_ACCOUNT_ID }}
+      TF_VAR_monthly_budget_usd: ${{ vars.GCP_MONTHLY_BUDGET_USD || '6' }}
+      GAR_REPOSITORY: garmin-trainer
+      CLOUD_RUN_SERVICE: garmin-trainer-api
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -45,12 +44,8 @@ jobs:
           : "${GCP_REGION:?Set GitHub variable GCP_REGION}"
           : "${GCP_WIF_PROVIDER:?Set GitHub variable GCP_WIF_PROVIDER}"
           : "${GCP_TERRAFORM_SERVICE_ACCOUNT:?Set GitHub variable GCP_TERRAFORM_SERVICE_ACCOUNT}"
-          : "${GAR_REPOSITORY:?Set GitHub variable GAR_REPOSITORY}"
-          : "${CLOUD_RUN_SERVICE:?Set GitHub variable CLOUD_RUN_SERVICE}"
-          : "${VITE_FIREBASE_API_KEY:?Set GitHub variable VITE_FIREBASE_API_KEY}"
-          : "${VITE_FIREBASE_AUTH_DOMAIN:?Set GitHub variable VITE_FIREBASE_AUTH_DOMAIN}"
-          : "${VITE_FIREBASE_PROJECT_ID:?Set GitHub variable VITE_FIREBASE_PROJECT_ID}"
-          : "${VITE_FIREBASE_APP_ID:?Set GitHub variable VITE_FIREBASE_APP_ID}"
+          : "${GCP_BILLING_ACCOUNT_ID:?Set GitHub variable GCP_BILLING_ACCOUNT_ID}"
+          : "${ALLOWED_USER_EMAIL:?Set GitHub secret ALLOWED_USER_EMAIL}"
 
       - name: Authenticate to Google Cloud with WIF
         uses: google-github-actions/auth@v3
@@ -63,6 +58,46 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+
+      - name: Generate Terraform backend configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          GITHUB_OWNER="${GITHUB_REPOSITORY%%/*}"
+          GITHUB_REPO="${GITHUB_REPOSITORY#*/}"
+          echo "TF_VAR_github_owner=${GITHUB_OWNER}" >> "$GITHUB_ENV"
+          echo "TF_VAR_github_repo=${GITHUB_REPO}" >> "$GITHUB_ENV"
+          cat > infra/backend.hcl <<EOF
+          bucket = "${GCP_PROJECT_ID}-tfstate"
+          prefix = "garmin-trainer"
+          EOF
+
+      - name: Terraform format and validate
+        run: terraform fmt -check -recursive infra
+
+      - name: Plan and apply Terraform
+        working-directory: infra
+        run: |
+          terraform init -input=false -backend-config=backend.hcl
+          terraform validate
+          terraform plan -input=false -out=deployment.tfplan
+          terraform apply -input=false deployment.tfplan
+
+      - name: Export public Firebase client config
+        shell: bash
+        run: |
+          set -euo pipefail
+          CONFIG="$(terraform -chdir=infra output -json firebase_web_app_config)"
+          echo "VITE_FIREBASE_API_KEY=$(jq -r '.api_key' <<< "$CONFIG")" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_AUTH_DOMAIN=$(jq -r '.auth_domain' <<< "$CONFIG")" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_PROJECT_ID=$(jq -r '.project_id' <<< "$CONFIG")" >> "$GITHUB_ENV"
+          echo "VITE_FIREBASE_APP_ID=$(jq -r '.app_id' <<< "$CONFIG")" >> "$GITHUB_ENV"
+          echo "VITE_API_BASE_URL=/api" >> "$GITHUB_ENV"
 
       - name: Build and push API image
         shell: bash

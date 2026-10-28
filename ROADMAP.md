@@ -29,27 +29,29 @@
 
 ## Phase 1 — Fondations et sécurité
 
-> **État :** code de fondation prêt et validations locales passées. L’activation
-> GCP n’est pas encore faite : aucun `terraform apply` n’a été exécuté.
+> **État :** code de fondation prêt et validations locales passées. Le bootstrap
+> du state est fait et un apply principal a créé une partie des ressources, mais
+> Firebase/Hosting et l’invocation Cloud Run restent bloqués. Les prochains
+> applies doivent passer uniquement par le workflow GitHub manuel.
 
 ### Travaux
 
 - [x] Initialiser la PWA React/TypeScript et l’API FastAPI ; définir `/healthz` et `/api/v1/me`.
-- [x] Écrire le bootstrap Terraform du bucket GCS privé/versionné, puis la configuration principale avec import des ressources WIF existantes.
+- [x] Créer le bucket GCS privé/versionné pour le state et écrire la configuration principale avec import des ressources WIF existantes.
 - [x] Décrire Firebase Hosting/Auth, Cloud Run, Firestore en `europe-west1`, Artifact Registry, Secret Manager, IAM et l’alerte de budget facultative dans Terraform.
-- [x] Mettre en place les workflows GitHub Actions de tests/validation et un déploiement applicatif WIF protégé par `GCP_DEPLOY_ENABLED`.
+- [x] Mettre en place les workflows GitHub Actions de tests/validation et un pipeline `workflow_dispatch` WIF pour appliquer Terraform puis déployer l’application.
 - [x] Restreindre l’API à un jeton Firebase valide et à l’unique e-mail vérifié autorisé ; ne pas utiliser de clé JSON.
 - [x] Ajouter les règles Firestore deny-all côté navigateur, les origines CORS et les logs sans tokens/secrets.
 - [x] Décrire les collections Firestore et règles de conservation dans `infra/FIRESTORE_SCHEMA.md`.
-- [ ] Créer le bucket d’état et appliquer Terraform avec les credentials du propriétaire après revue du plan.
+- [~] Apply principal partiel : Cloud Run (image hello), Firestore, Artifact Registry, secrets vides et IAM sont créés ; le run a échoué sur la création Firebase et la politique d’invoker public.
 - [ ] Configurer `allowed_user_email`, les variables GitHub et, si souhaité, `billing_account_id` ; tester l’inscription, la vérification e-mail et l’appel API sur GCP.
-- [ ] Activer `GCP_DEPLOY_ENABLED` après le premier déploiement et confirmer les coûts réels.
+- [ ] Configurer les permissions de provisionnement du compte WIF, déclencher le workflow manuel, puis confirmer les coûts réels.
 
 ### Critères de sortie
 
-- Validations locales réussies : build PWA, tests API et `terraform validate` pour les deux configurations.
-- Restent à vérifier en GCP : accès PWA authentifié, state distant effectivement créé, invocation Hosting→Cloud Run, alertes de budget et permissions WIF.
-- Le déploiement CI de l’application est prévu ; l’`apply` Terraform via GitHub Actions est différé pour éviter d’attribuer un rôle d’administration général au runner.
+- Validations locales réussies : build PWA, tests API et `terraform validate` pour les deux configurations ; CI API est corrigée.
+- Restent à vérifier en GCP : Firebase/Auth/Hosting, règles Firestore, invoker Cloud Run, budget, compte utilisateur authentifié et déploiement de l’image API.
+- Les prochains applies doivent passer par le workflow manuel GitHub Actions. Le dispatch attend les permissions de provisionnement du compte WIF et la résolution de la politique d’organisation.
 
 ## Phase 2 — Connecteur Garmin et qualité des données
 

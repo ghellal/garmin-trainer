@@ -162,8 +162,9 @@ L’emplacement Firestore est choisi à la création et ne se déplace pas simpl
 - L’état Terraform est conservé dans un bucket GCS privé avec versioning et accès minimal. Le bootstrap initial du bucket et de l’identité fédérée doit être documenté ; aucun secret ne doit être commité.
 - Les valeurs des secrets Garmin/IA sont ajoutées à Secret Manager hors du code et ne sont pas passées comme valeurs Terraform persistées dans le state.
 - Sur pull request : formatage Terraform, validation, tests API et build PWA ; aucun accès GCP ni `apply`.
-- Sur la branche principale : déploiement applicatif via WIF, activable après le premier apply Terraform et la configuration des variables GitHub. Le pipeline ne fait pas encore `terraform apply` ; l’infrastructure est appliquée avec les credentials ADC du propriétaire jusqu’à validation d’un rôle Terraform dédié.
-- L’identité WIF a des rôles de déploiement Cloud Run/Hosting et l’accès au dépôt d’images/state ; elle ne reçoit pas Owner/Editor. Les sorties et artefacts GitHub ne doivent pas exposer de secrets.
+- Sur `main`, le workflow GitHub Actions `workflow_dispatch` applique Terraform puis déploie l’application via WIF. Aucun `terraform apply` local n’est autorisé.
+- Le compte WIF doit recevoir les permissions de provisionnement nécessaires avant le premier dispatch ; `roles/resourcemanager.projectIamAdmin` est particulièrement puissant et doit être approuvé/protégé.
+- L’identité WIF a aussi des rôles de déploiement Cloud Run/Hosting et l’accès au dépôt d’images/state. Les sorties et artefacts GitHub ne doivent pas exposer de secrets.
 
 ### 7.3 Couche IA
 

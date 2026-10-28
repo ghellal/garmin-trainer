@@ -40,7 +40,7 @@ The Claude Agent SDK requires the [Claude Code CLI](https://docs.claude.com/en/d
 - `api/`: FastAPI service. `/healthz` is a minimal liveness endpoint; `/api/v1/me` verifies Firebase ID tokens and only accepts the configured verified user email.
 - `infra/`: Terraform for Firebase Hosting/Auth, Firestore, Secret Manager, Artifact Registry and Cloud Run. See [infra/README.md](infra/README.md) for the bootstrap/apply sequence.
 - `.github/workflows/terraform-checks.yml`: API tests, PWA build, Terraform format and validation.
-- `.github/workflows/deploy.yml`: WIF-based app deployment, gated until `GCP_DEPLOY_ENABLED=true` is set in GitHub Actions variables.
+- `.github/workflows/deploy.yml`: manual `workflow_dispatch` pipeline that applies Terraform and then deploys the API/PWA using WIF.
 
 The Cloud Run endpoint is invokable by Firebase Hosting's `/api/**` rewrite, but application routes require a valid Firebase ID token and the server-side email allowlist. Firestore is not accessed directly from the browser; its rules deny client access.
 
