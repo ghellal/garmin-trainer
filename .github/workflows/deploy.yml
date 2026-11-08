@@ -188,7 +188,22 @@ jobs:
             echo "::error::Bootstrap IAM plan fingerprint could not be generated."
             exit 1
           fi
-          fingerprint="$(jq -S -c . "$plan_json" | sha256sum | cut -d' ' -f1)"
+          fingerprint="$(jq -S -c '
+            {
+              resource_changes: [.resource_changes[]? | {
+                address, mode, type, name, index, deposed,
+                actions: .change.actions,
+                before: .change.before,
+                after: .change.after,
+                before_sensitive: .change.before_sensitive,
+                after_sensitive: .change.after_sensitive,
+                after_unknown: .change.after_unknown,
+                importing: .change.importing
+              }],
+              output_changes: .output_changes,
+              checks: .checks
+            }
+          ' "$plan_json" | sha256sum | cut -d' ' -f1)"
           echo "BOOTSTRAP_IAM_SHA256=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Plan infrastructure
@@ -214,7 +229,22 @@ jobs:
             echo "::error::Infrastructure plan fingerprint could not be generated."
             exit 1
           fi
-          fingerprint="$(jq -S -c . "$plan_json" | sha256sum | cut -d' ' -f1)"
+          fingerprint="$(jq -S -c '
+            {
+              resource_changes: [.resource_changes[]? | {
+                address, mode, type, name, index, deposed,
+                actions: .change.actions,
+                before: .change.before,
+                after: .change.after,
+                before_sensitive: .change.before_sensitive,
+                after_sensitive: .change.after_sensitive,
+                after_unknown: .change.after_unknown,
+                importing: .change.importing
+              }],
+              output_changes: .output_changes,
+              checks: .checks
+            }
+          ' "$plan_json" | sha256sum | cut -d' ' -f1)"
           echo "INFRA_SHA256=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Publish sanitized resource-action summary
