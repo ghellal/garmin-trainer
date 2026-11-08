@@ -12,9 +12,10 @@ on:
         default: plan
         required: true
       target:
-        description: Deploy only the API, or deploy the API and web app
+        description: Bootstrap Terraform IAM, deploy only the API, or deploy the API and web app
         type: choice
         options:
+          - bootstrap-iam
           - api
           - all
         default: api
@@ -81,7 +82,7 @@ jobs:
           : "${GCP_BILLING_ACCOUNT_ID:?Set GitHub variable GCP_BILLING_ACCOUNT_ID}"
           : "${ALLOWED_USER_EMAIL:?Set GitHub secret ALLOWED_USER_EMAIL}"
           [[ "$DEPLOY_MODE" == "plan" || "$DEPLOY_MODE" == "apply" ]] || { echo "::error::Invalid mode."; exit 1; }
-          [[ "$DEPLOY_TARGET" == "api" || "$DEPLOY_TARGET" == "all" ]] || { echo "::error::Invalid target."; exit 1; }
+          [[ "$DEPLOY_TARGET" == "bootstrap-iam" || "$DEPLOY_TARGET" == "api" || "$DEPLOY_TARGET" == "all" ]] || { echo "::error::Invalid target."; exit 1; }
           if [[ "$DEPLOY_MODE" == "apply" ]]; then
             [[ "$REVIEWED_PLAN_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Apply requires a numeric reviewed_plan_run_id."; exit 1; }
           fi
@@ -113,6 +114,7 @@ jobs:
           echo "TF_VAR_github_repo=${GITHUB_REPO}" >> "$GITHUB_ENV"
           echo "BOOTSTRAP_IAM_PLAN=${RUNNER_TEMP}/bootstrap-iam.tfplan" >> "$GITHUB_ENV"
           echo "INFRA_PLAN=${RUNNER_TEMP}/infra.tfplan" >> "$GITHUB_ENV"
+          echo "INFRA_SHA256=not-applicable" >> "$GITHUB_ENV"
           cat > infra/backend.hcl <<EOF
           bucket = "${GCP_PROJECT_ID}-tfstate"
           prefix = "garmin-trainer"
@@ -143,7 +145,8 @@ jobs:
              .commit == $commit and
              .target == $target and
              (.bootstrap_iam_sha256 | test("^[a-f0-9]{64}$")) and
-             (.infra_sha256 | test("^[a-f0-9]{64}$"))' \
+             (if $target == "bootstrap-iam" then .infra_sha256 == "not-applicable"
+              else (.infra_sha256 | test("^[a-f0-9]{64}$")) end)' \
             "$manifest" >/dev/null 2>&1; then
             echo "::error::Reviewed plan is missing, stale, or does not match this commit and target."
             exit 1
@@ -189,6 +192,7 @@ jobs:
           echo "BOOTSTRAP_IAM_SHA256=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Plan infrastructure
+        if: env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail
@@ -243,7 +247,9 @@ jobs:
             done <<< "$changes"
           }
           summarize_plan "Bootstrap IAM resource actions" "infra/bootstrap-iam" "$BOOTSTRAP_IAM_PLAN" "$RUNNER_TEMP/bootstrap-iam-plan.json" "$RUNNER_TEMP/bootstrap-iam-show.log"
-          summarize_plan "Infrastructure resource actions" "infra" "$INFRA_PLAN" "$RUNNER_TEMP/infra-plan.json" "$RUNNER_TEMP/infra-show.log"
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            summarize_plan "Infrastructure resource actions" "infra" "$INFRA_PLAN" "$RUNNER_TEMP/infra-plan.json" "$RUNNER_TEMP/infra-show.log"
+          fi
           {
             printf '\nPlan run ID: `%s`\n' "$GITHUB_RUN_ID"
             printf 'Target: `%s`\n' "$DEPLOY_TARGET"
@@ -281,7 +287,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$BOOTSTRAP_IAM_SHA256" != "$REVIEWED_BOOTSTRAP_IAM_SHA256" || "$INFRA_SHA256" != "$REVIEWED_INFRA_SHA256" ]]; then
+          if [[ "$BOOTSTRAP_IAM_SHA256" != "$REVIEWED_BOOTSTRAP_IAM_SHA256" ]]; then
+            echo "::error::Bootstrap IAM plan fingerprint changed; no Terraform plan was applied. Review a new plan run."
+            exit 1
+          fi
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" && "$INFRA_SHA256" != "$REVIEWED_INFRA_SHA256" ]]; then
             echo "::error::Terraform plan fingerprints changed; neither Terraform plan was applied. Review a new plan run."
             exit 1
           fi
@@ -291,7 +301,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for entry in "infra/bootstrap-iam:$BOOTSTRAP_IAM_PLAN:bootstrap-iam" "infra:$INFRA_PLAN:infra"; do
+          plans=("infra/bootstrap-iam:$BOOTSTRAP_IAM_PLAN:bootstrap-iam")
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            plans+=("infra:$INFRA_PLAN:infra")
+          fi
+          for entry in "${plans[@]}"; do
             IFS=: read -r root plan name <<< "$entry"
             json_file="$RUNNER_TEMP/${name}-apply-plan.json"
             if ! terraform -chdir="$root" show -json "$plan" >"$json_file" 2>"$RUNNER_TEMP/${name}-apply-show.log"; then
@@ -318,7 +332,7 @@ jobs:
           fi
 
       - name: Apply infrastructure plan
-        if: env.DEPLOY_MODE == 'apply'
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail
@@ -340,7 +354,7 @@ jobs:
           echo "VITE_API_BASE_URL=/api" >> "$GITHUB_ENV"
 
       - name: Build and push API image
-        if: env.DEPLOY_MODE == 'apply'
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail
@@ -351,7 +365,7 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy API image
-        if: env.DEPLOY_MODE == 'apply'
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail
@@ -366,7 +380,7 @@ jobs:
           echo "Cloud Run API image updated."
 
       - name: Verify public Cloud Run access and API authorization
-        if: env.DEPLOY_MODE == 'apply'
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail

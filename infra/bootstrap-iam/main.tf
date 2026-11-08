@@ -6,6 +6,7 @@ locals {
     "roles/datastore.owner",
     "roles/firebase.admin",
     "roles/iam.serviceAccountAdmin",
+    "roles/iam.workloadIdentityPoolAdmin",
     "roles/identitytoolkit.admin",
     "roles/resourcemanager.projectIamAdmin",
     "roles/run.admin",

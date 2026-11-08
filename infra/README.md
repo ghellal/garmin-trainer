@@ -42,20 +42,26 @@ The protected `production` environment and WIF identity are used in both modes.
 The workflow passes Terraform inputs through `TF_VAR_*` environment variables
 and creates ignored backend configuration files on the ephemeral runner.
 
-1. Dispatch with `mode=plan` and choose `target=api` or `target=all`. The job
-   plans both `infra/bootstrap-iam` and `infra`, but does not apply or deploy.
-   Its workflow summary contains only Terraform resource actions and addresses.
-   It writes the commit, target, workflow run ID, and plan fingerprints to
-   `garmin-trainer/release-plans/` in the Terraform state bucket. That bucket
-   enforces public access prevention. Saved plan files and plan values are not
-   uploaded, added to artifacts, or printed in workflow logs.
-2. Review the exact resource actions and addresses in the completed plan run.
+1. For initial WIF permissions, dispatch with `mode=plan,target=bootstrap-iam`.
+   This plans only `infra/bootstrap-iam`; it does not apply or deploy. Review the
+   exact IAM changes, including `roles/iam.workloadIdentityPoolAdmin` for the
+   Terraform-managed WIF pool/provider. Apply only after reviewing the summary,
+   using `mode=apply`, the same target, and `reviewed_plan_run_id` from that run.
+2. After bootstrap IAM succeeds, dispatch with `mode=plan` and choose
+   `target=api` or `target=all`. This plans both `infra/bootstrap-iam` and
+   `infra`, but does not apply or deploy. Its workflow summary contains only
+   Terraform resource actions and addresses. It writes the commit, target,
+   workflow run ID, and plan fingerprints to `garmin-trainer/release-plans/` in
+   the Terraform state bucket. That bucket enforces public access prevention.
+   Saved plan files and plan values are not uploaded, added to artifacts, or
+   printed in workflow logs.
+3. Review the exact resource actions and addresses in the completed plan run.
    Before approving any destructive action, explicitly review its recovery path.
    Dispatch again on the same commit with `mode=apply`, the same target, and
    `reviewed_plan_run_id` set to the plan run ID. If a plan contains a delete or
    replacement, also enable `confirm_destructive` only after that review.
-3. Apply mode loads the private manifest, recomputes both plans, and compares
-   both fingerprints before either Terraform apply. It applies only those plans
+   Apply mode loads the private manifest, recomputes the relevant plan(s), and
+   compares fingerprints before any Terraform apply. It applies only plans
    generated in the apply run. A missing, stale, mismatched, or changed plan
    aborts before Terraform apply. Terraform output containing plan values is
    suppressed.
@@ -110,7 +116,8 @@ account.
 The bootstrap stack grants `roles/serviceusage.serviceUsageAdmin`,
 `roles/firebase.admin`, `roles/identitytoolkit.admin`, `roles/datastore.owner`,
 `roles/secretmanager.admin`, `roles/iam.serviceAccountAdmin`,
-`roles/artifactregistry.admin`, and `roles/run.admin`. Some of these roles allow
+`roles/iam.workloadIdentityPoolAdmin`, `roles/artifactregistry.admin`, and
+`roles/run.admin`. Some of these roles allow
 the pipeline identity to access Firestore data or Secret Manager values; treat
 the WIF identity and protected workflow as highly privileged. Project IAM
 Admin can grant other project roles, so scope it to this project, restrict WIF

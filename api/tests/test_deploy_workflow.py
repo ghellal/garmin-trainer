@@ -76,3 +76,38 @@ def test_api_only_target_does_not_deploy_firebase_hosting() -> None:
         "Build and deploy PWA and Firestore rules"
     )
     assert "if: env.DEPLOY_MODE == 'apply'" in step("Deploy API image")
+
+
+def test_bootstrap_iam_target_stops_before_infrastructure_and_api() -> None:
+    assert "- bootstrap-iam" in WORKFLOW
+    assert (
+        "if: env.DEPLOY_TARGET != 'bootstrap-iam'"
+        in step("Plan infrastructure")
+    )
+    assert '.infra_sha256 == "not-applicable"' in step("Load reviewed plan manifest")
+    assert 'if [[ "$DEPLOY_TARGET" != "bootstrap-iam" &&' in step(
+        "Verify reviewed plan fingerprints"
+    )
+    assert 'if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]' in step(
+        "Require destructive-change review"
+    )
+    for name in (
+        "Apply infrastructure plan",
+        "Build and push API image",
+        "Deploy API image",
+        "Verify public Cloud Run access and API authorization",
+    ):
+        assert (
+            "if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'"
+            in step(name)
+        )
+
+
+def test_bootstrap_grants_the_wif_pool_role_required_by_main_terraform() -> None:
+    bootstrap_iam = (
+        Path(__file__).resolve().parents[2]
+        / "infra"
+        / "bootstrap-iam"
+        / "main.tf"
+    ).read_text(encoding="utf-8")
+    assert '"roles/iam.workloadIdentityPoolAdmin"' in bootstrap_iam

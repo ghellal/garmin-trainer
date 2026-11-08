@@ -3,7 +3,7 @@ title: Publish the minimal authenticated API on Cloud Run
 type: feature
 ticket: ''
 created: '2026-11-09'
-status: built
+status: in-progress
 baseline_revision: 'b977d20806f975e5006f173dbc584aae305a1556'
 route: full
 route_source: auto
@@ -48,6 +48,7 @@ context:
 
 - `.github/workflows/deploy.yml` -- current single-job workflow runs Terraform plan/apply immediately, then builds/deploys API and PWA. Add plan/apply review modes and API-only target while retaining existing full-deploy behavior.
 - `infra/main.tf` -- Cloud Run service configuration and `allUsers` invoker binding; Terraform owns both.
+- `infra/bootstrap-iam/main.tf` -- the WIF runner's project roles; add Workload Identity Pool Admin so the main root can read/manage the imported pool and provider.
 - `infra/bootstrap-state/main.tf` -- existing state bucket is private, enforces public access prevention, and grants the WIF runner object-admin access; suitable for non-sensitive plan fingerprints, not saved plan files.
 - `api/app/main.py` -- already provides public `/healthz` and Firebase-verified `/api/v1/me`; no feature code change is required.
 - `api/Dockerfile`, `api/requirements.txt` -- existing non-root Python 3.13 API image, listening on port 8080.
@@ -58,12 +59,14 @@ context:
 
 **Execution:**
 - [x] `.github/workflows/deploy.yml` -- add `plan`/`apply` and `api`/`all` inputs. Plan mode emits a sanitized resource-action summary and stores only run/commit/target plus fingerprints in the private GCS state bucket. Apply mode validates that manifest, recomputes both Terraform plans, stops on any mismatch, applies only those generated plans, then deploys the API; `api` skips Hosting and Firestore-rule deployment while `all` preserves current behavior.
+- [x] `infra/bootstrap-iam/main.tf` and `.github/workflows/deploy.yml` -- add the WIF pool admin permission and a `bootstrap-iam` target so its exact IAM plan can be reviewed/applied before the main root needs that permission.
 - [x] `api/tests/test_deploy_workflow.py` -- assert plan mode cannot apply, apply requires a same-commit/target manifest and matching fingerprints before Terraform apply, destructive actions require confirmation, and API-only mode skips Hosting; keep the public/protected route checks covered by `test_main.py`.
 - [ ] `.github/workflows/deploy.yml` -- after API deployment, read-only verify `allUsers` invoker, unauthenticated `/healthz` returns 200, and unauthenticated `/api/v1/me` returns 401. Do not print plan values or secret environment values.
 - [x] `infra/README.md` -- document the plan review and API-only dispatch, clarify that public Cloud Run invocation is not anonymous application authorization, and retain the no-local-apply rule.
 
 **Acceptance Criteria:**
 - Given a plan dispatch on `main`, when Terraform planning completes, then no resource is applied and the public workflow output contains only resource actions/addresses, not values.
+- Given the initial runner lacks permission to read the imported WIF pool, when `target=bootstrap-iam` is planned and reviewed/applied, then only the bootstrap IAM root is applied and the WIF pool admin role is reported before authorization.
 - Given an apply dispatch referencing the reviewed plan, when the commit, target, or either Terraform plan fingerprint differs, then the workflow aborts before either Terraform apply.
 - Given matching fingerprints, when the API-only apply completes, then the API image is deployed to `garmin-trainer-api` and Firebase Hosting is not deployed.
 - Given the resulting Cloud Run service, when requests are unauthenticated, then `/healthz` returns 200 and `/api/v1/me` returns 401; valid Firebase authentication and the allowlist remain enforced.
@@ -80,6 +83,10 @@ Local verification: API suite 10 passed; Terraform format check and validation p
 Implementation and code review are complete locally. The workflow was not pushed or dispatched from this build run; Cloud Run remains unchanged until the reviewed `mode=plan`, `target=api` workflow is run on `main`, its resource actions are inspected, and the matching apply is explicitly dispatched.
 
 After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
+
+Plan-only run `42536352154` identified the missing `iam.workloadIdentityPools.get` permission while reading the imported WIF pool. The workflow now supports a bootstrap-only target, and `infra/bootstrap-iam` grants `roles/iam.workloadIdentityPoolAdmin`; the grant remains unapplied pending review of its exact bootstrap IAM plan.
+
+The `bootstrap-iam` target now plans/applies only the bootstrap IAM root and skips main infrastructure planning, API image deployment, and Hosting. Local tests and validation pass; the next required remote step is a plan-only bootstrap run so the exact IAM grant can be reviewed before any apply.
 
 ## Plan Change Log
 
