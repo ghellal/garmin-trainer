@@ -1,13 +1,43 @@
-name: Apply infrastructure and deploy
+name: Review and deploy infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Plan for review, or apply a matching reviewed plan
+        type: choice
+        options:
+          - plan
+          - apply
+        default: plan
+        required: true
+      target:
+        description: Deploy only the API, or deploy the API and web app
+        type: choice
+        options:
+          - api
+          - all
+        default: api
+        required: true
+      reviewed_plan_run_id:
+        description: Required for apply; the workflow run ID of the reviewed plan
+        type: string
+        required: false
+      confirm_destructive:
+        description: Confirm only after reviewing exact destructive actions and recovery
+        type: boolean
+        default: false
+        required: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: garmin-trainer-deploy
+  cancel-in-progress: false
+
 jobs:
-  apply-and-deploy:
+  review-and-deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
@@ -30,6 +60,10 @@ jobs:
       TF_VAR_allowed_user_email: ${{ secrets.ALLOWED_USER_EMAIL }}
       TF_VAR_billing_account_id: ${{ vars.GCP_BILLING_ACCOUNT_ID }}
       TF_VAR_monthly_budget_usd: ${{ vars.GCP_MONTHLY_BUDGET_USD || '6' }}
+      DEPLOY_MODE: ${{ inputs.mode }}
+      DEPLOY_TARGET: ${{ inputs.target }}
+      REVIEWED_PLAN_RUN_ID: ${{ inputs.reviewed_plan_run_id }}
+      CONFIRM_DESTRUCTIVE: ${{ inputs.confirm_destructive }}
       GAR_REPOSITORY: garmin-trainer
       CLOUD_RUN_SERVICE: garmin-trainer-api
     steps:
@@ -46,6 +80,11 @@ jobs:
           : "${GCP_TERRAFORM_SERVICE_ACCOUNT:?Set GitHub variable GCP_TERRAFORM_SERVICE_ACCOUNT}"
           : "${GCP_BILLING_ACCOUNT_ID:?Set GitHub variable GCP_BILLING_ACCOUNT_ID}"
           : "${ALLOWED_USER_EMAIL:?Set GitHub secret ALLOWED_USER_EMAIL}"
+          [[ "$DEPLOY_MODE" == "plan" || "$DEPLOY_MODE" == "apply" ]] || { echo "::error::Invalid mode."; exit 1; }
+          [[ "$DEPLOY_TARGET" == "api" || "$DEPLOY_TARGET" == "all" ]] || { echo "::error::Invalid target."; exit 1; }
+          if [[ "$DEPLOY_MODE" == "apply" ]]; then
+            [[ "$REVIEWED_PLAN_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Apply requires a numeric reviewed_plan_run_id."; exit 1; }
+          fi
 
       - name: Authenticate to Google Cloud with WIF
         uses: google-github-actions/auth@v3
@@ -72,6 +111,8 @@ jobs:
           GITHUB_REPO="${GITHUB_REPOSITORY#*/}"
           echo "TF_VAR_github_owner=${GITHUB_OWNER}" >> "$GITHUB_ENV"
           echo "TF_VAR_github_repo=${GITHUB_REPO}" >> "$GITHUB_ENV"
+          echo "BOOTSTRAP_IAM_PLAN=${RUNNER_TEMP}/bootstrap-iam.tfplan" >> "$GITHUB_ENV"
+          echo "INFRA_PLAN=${RUNNER_TEMP}/infra.tfplan" >> "$GITHUB_ENV"
           cat > infra/backend.hcl <<EOF
           bucket = "${GCP_PROJECT_ID}-tfstate"
           prefix = "garmin-trainer"
@@ -81,26 +122,203 @@ jobs:
           prefix = "garmin-trainer/bootstrap-iam"
           EOF
 
+      - name: Load reviewed plan manifest
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bucket="${GCP_PROJECT_ID}-tfstate"
+          manifest="$RUNNER_TEMP/reviewed-plan.json"
+          object="gs://${bucket}/garmin-trainer/release-plans/${REVIEWED_PLAN_RUN_ID}.json"
+          if ! gcloud storage cp --quiet "$object" "$manifest" >"$RUNNER_TEMP/manifest-download.log" 2>&1; then
+            echo "::error::Reviewed plan manifest could not be loaded from the private state bucket."
+            exit 1
+          fi
+          if ! jq -e \
+            --arg run_id "$REVIEWED_PLAN_RUN_ID" \
+            --arg commit "$GITHUB_SHA" \
+            --arg target "$DEPLOY_TARGET" \
+            '.schema_version == 1 and
+             .plan_run_id == $run_id and
+             .commit == $commit and
+             .target == $target and
+             (.bootstrap_iam_sha256 | test("^[a-f0-9]{64}$")) and
+             (.infra_sha256 | test("^[a-f0-9]{64}$"))' \
+            "$manifest" >/dev/null 2>&1; then
+            echo "::error::Reviewed plan is missing, stale, or does not match this commit and target."
+            exit 1
+          fi
+          echo "REVIEWED_BOOTSTRAP_IAM_SHA256=$(jq -r '.bootstrap_iam_sha256' "$manifest")" >> "$GITHUB_ENV"
+          echo "REVIEWED_INFRA_SHA256=$(jq -r '.infra_sha256' "$manifest")" >> "$GITHUB_ENV"
+
       - name: Terraform format and validate
         run: terraform fmt -check -recursive infra
 
-      - name: Bootstrap Terraform service-account permissions
-        working-directory: infra/bootstrap-iam
+      - name: Initialize and validate Terraform roots
+        shell: bash
         run: |
-          terraform init -input=false -backend-config=backend.hcl
-          terraform validate
-          terraform plan -input=false -out=bootstrap-iam.tfplan
-          terraform apply -input=false bootstrap-iam.tfplan
+          set -euo pipefail
+          terraform -chdir=infra/bootstrap-iam init -input=false -backend-config=backend.hcl
+          terraform -chdir=infra/bootstrap-iam validate
+          terraform -chdir=infra init -input=false -backend-config=backend.hcl
+          terraform -chdir=infra validate
 
-      - name: Plan and apply Terraform
-        working-directory: infra
+      - name: Plan bootstrap IAM
+        shell: bash
         run: |
-          terraform init -input=false -backend-config=backend.hcl
-          terraform validate
-          terraform plan -input=false -out=deployment.tfplan
-          terraform apply -input=false deployment.tfplan
+          set -euo pipefail
+          set +e
+          terraform -chdir=infra/bootstrap-iam plan -input=false -no-color -detailed-exitcode -out="$BOOTSTRAP_IAM_PLAN" >"$RUNNER_TEMP/bootstrap-iam-plan.log" 2>&1
+          plan_status=$?
+          set -e
+          if [[ "$plan_status" -ne 0 && "$plan_status" -ne 2 ]]; then
+            echo "::error::Terraform bootstrap IAM planning failed; sensitive plan output was suppressed."
+            exit 1
+          fi
+          plan_json="$RUNNER_TEMP/bootstrap-iam-fingerprint.json"
+          if ! terraform -chdir=infra/bootstrap-iam show -json "$BOOTSTRAP_IAM_PLAN" >"$plan_json" 2>"$RUNNER_TEMP/bootstrap-iam-fingerprint.log"; then
+            echo "::error::Bootstrap IAM plan fingerprint could not be generated."
+            exit 1
+          fi
+          fingerprint="$(jq -S -c . "$plan_json" | sha256sum | cut -d' ' -f1)"
+          echo "BOOTSTRAP_IAM_SHA256=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Plan infrastructure
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          terraform -chdir=infra plan -input=false -no-color -detailed-exitcode -out="$INFRA_PLAN" >"$RUNNER_TEMP/infra-plan.log" 2>&1
+          plan_status=$?
+          set -e
+          if [[ "$plan_status" -ne 0 && "$plan_status" -ne 2 ]]; then
+            echo "::error::Terraform infrastructure planning failed; sensitive plan output was suppressed."
+            exit 1
+          fi
+          plan_json="$RUNNER_TEMP/infra-fingerprint.json"
+          if ! terraform -chdir=infra show -json "$INFRA_PLAN" >"$plan_json" 2>"$RUNNER_TEMP/infra-fingerprint.log"; then
+            echo "::error::Infrastructure plan fingerprint could not be generated."
+            exit 1
+          fi
+          fingerprint="$(jq -S -c . "$plan_json" | sha256sum | cut -d' ' -f1)"
+          echo "INFRA_SHA256=$fingerprint" >> "$GITHUB_ENV"
+
+      - name: Publish sanitized resource-action summary
+        if: env.DEPLOY_MODE == 'plan'
+        shell: bash
+        run: |
+          set -euo pipefail
+          summarize_plan() {
+            local label="$1"
+            local root="$2"
+            local plan_file="$3"
+            local json_file="$4"
+            local error_file="$5"
+            if ! terraform -chdir="$root" show -json "$plan_file" >"$json_file" 2>"$error_file"; then
+              echo "::error::Terraform plan summary could not be generated."
+              exit 1
+            fi
+            printf '### %s\n' "$label" >> "$GITHUB_STEP_SUMMARY"
+            local changes
+            changes="$(jq -r '
+              [.resource_changes[]?
+               | select((.change.actions != ["no-op"] and .change.actions != ["read"])
+                       or (.change.importing? != null))
+               | (if .change.importing? != null then "import"
+                  else (.change.actions | join("/")) end) + " \(.address)"]
+              | if length == 0 then "No resource changes" else .[] end
+            ' "$json_file")"
+            while IFS= read -r change; do
+              printf -- '- `%s`\n' "$change" >> "$GITHUB_STEP_SUMMARY"
+            done <<< "$changes"
+          }
+          summarize_plan "Bootstrap IAM resource actions" "infra/bootstrap-iam" "$BOOTSTRAP_IAM_PLAN" "$RUNNER_TEMP/bootstrap-iam-plan.json" "$RUNNER_TEMP/bootstrap-iam-show.log"
+          summarize_plan "Infrastructure resource actions" "infra" "$INFRA_PLAN" "$RUNNER_TEMP/infra-plan.json" "$RUNNER_TEMP/infra-show.log"
+          {
+            printf '\nPlan run ID: `%s`\n' "$GITHUB_RUN_ID"
+            printf 'Target: `%s`\n' "$DEPLOY_TARGET"
+            printf 'No resources were applied. To continue, dispatch apply on this same commit and target, using this plan run ID.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Store private plan fingerprints
+        if: env.DEPLOY_MODE == 'plan'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bucket="${GCP_PROJECT_ID}-tfstate"
+          if ! access_prevention="$(gcloud storage buckets describe "gs://${bucket}" --format='value(iamConfiguration.publicAccessPrevention)' 2>"$RUNNER_TEMP/bucket-describe.log")"; then
+            echo "::error::Could not verify the Terraform state bucket access policy."
+            exit 1
+          fi
+          [[ "$access_prevention" == "enforced" ]] || { echo "::error::Terraform state bucket does not enforce public access prevention."; exit 1; }
+          manifest="$RUNNER_TEMP/plan-manifest.json"
+          jq -n \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg commit "$GITHUB_SHA" \
+            --arg target "$DEPLOY_TARGET" \
+            --arg bootstrap_iam_sha256 "$BOOTSTRAP_IAM_SHA256" \
+            --arg infra_sha256 "$INFRA_SHA256" \
+            '{schema_version: 1, plan_run_id: $run_id, commit: $commit, target: $target, bootstrap_iam_sha256: $bootstrap_iam_sha256, infra_sha256: $infra_sha256}' \
+            > "$manifest"
+          object="gs://${bucket}/garmin-trainer/release-plans/${GITHUB_RUN_ID}.json"
+          if ! gcloud storage cp --quiet --if-generation-match=0 "$manifest" "$object" >"$RUNNER_TEMP/manifest-upload.log" 2>&1; then
+            echo "::error::Private plan fingerprint manifest could not be stored; no apply was run. Start a new plan run if this run ID was already used."
+            exit 1
+          fi
+
+      - name: Verify reviewed plan fingerprints
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$BOOTSTRAP_IAM_SHA256" != "$REVIEWED_BOOTSTRAP_IAM_SHA256" || "$INFRA_SHA256" != "$REVIEWED_INFRA_SHA256" ]]; then
+            echo "::error::Terraform plan fingerprints changed; neither Terraform plan was applied. Review a new plan run."
+            exit 1
+          fi
+
+      - name: Require destructive-change review
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for entry in "infra/bootstrap-iam:$BOOTSTRAP_IAM_PLAN:bootstrap-iam" "infra:$INFRA_PLAN:infra"; do
+            IFS=: read -r root plan name <<< "$entry"
+            json_file="$RUNNER_TEMP/${name}-apply-plan.json"
+            if ! terraform -chdir="$root" show -json "$plan" >"$json_file" 2>"$RUNNER_TEMP/${name}-apply-show.log"; then
+              echo "::error::Terraform plan could not be checked for destructive actions."
+              exit 1
+            fi
+            has_deletes="$(jq -r '[.resource_changes[]? | select(any(.change.actions[]?; . == "delete"))] | length > 0' "$json_file")"
+            if [[ "$has_deletes" == "true" ]]; then
+              if [[ "$CONFIRM_DESTRUCTIVE" != "true" ]]; then
+                echo "::error::A reviewed plan includes a destructive action. Inspect the exact actions and recovery path, then re-dispatch apply with confirm_destructive enabled."
+                exit 1
+              fi
+            fi
+          done
+
+      - name: Apply bootstrap IAM plan
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! terraform -chdir=infra/bootstrap-iam apply -input=false "$BOOTSTRAP_IAM_PLAN" >"$RUNNER_TEMP/bootstrap-iam-apply.log" 2>&1; then
+            echo "::error::Bootstrap IAM apply failed; Terraform output was suppressed."
+            exit 1
+          fi
+
+      - name: Apply infrastructure plan
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! terraform -chdir=infra apply -input=false "$INFRA_PLAN" >"$RUNNER_TEMP/infra-apply.log" 2>&1; then
+            echo "::error::Infrastructure apply failed; Terraform output was suppressed."
+            exit 1
+          fi
 
       - name: Export public Firebase client config
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET == 'all'
         shell: bash
         run: |
           set -euo pipefail
@@ -112,6 +330,7 @@ jobs:
           echo "VITE_API_BASE_URL=/api" >> "$GITHUB_ENV"
 
       - name: Build and push API image
+        if: env.DEPLOY_MODE == 'apply'
         shell: bash
         run: |
           set -euo pipefail
@@ -122,14 +341,63 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Deploy API image
-        run: >-
-          gcloud run services update "$CLOUD_RUN_SERVICE"
-          --project="$GCP_PROJECT_ID"
-          --region="$GCP_REGION"
-          --image="$IMAGE"
-          --quiet
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gcloud run services update "$CLOUD_RUN_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --image="$IMAGE" \
+            --quiet >"$RUNNER_TEMP/cloud-run-update.log" 2>&1; then
+            echo "::error::Cloud Run API image update failed; command output was suppressed."
+            exit 1
+          fi
+          echo "Cloud Run API image updated."
+
+      - name: Verify public Cloud Run access and API authorization
+        if: env.DEPLOY_MODE == 'apply'
+        shell: bash
+        run: |
+          set -euo pipefail
+          policy="$RUNNER_TEMP/cloud-run-iam-policy.json"
+          if ! gcloud run services get-iam-policy "$CLOUD_RUN_SERVICE" \
+            --project="$GCP_PROJECT_ID" \
+            --region="$GCP_REGION" \
+            --format=json >"$policy" 2>"$RUNNER_TEMP/cloud-run-iam-policy.log"; then
+            echo "::error::Cloud Run invoker policy could not be verified."
+            exit 1
+          fi
+          if ! jq -e 'any(.bindings[]?; .role == "roles/run.invoker" and any(.members[]?; . == "allUsers"))' "$policy" >/dev/null; then
+            echo "::error::Cloud Run does not grant allUsers the run.invoker role."
+            exit 1
+          fi
+
+          if ! api_url="$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" --format='value(status.url)' 2>"$RUNNER_TEMP/cloud-run-describe.log")"; then
+            echo "::error::Cloud Run service URL could not be read."
+            exit 1
+          fi
+          if ! health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/healthz.json" --write-out '%{http_code}' "$api_url/healthz")"; then
+            echo "::error::Unauthenticated /healthz request failed."
+            exit 1
+          fi
+          if [[ "$health_status" != "200" ]] || ! jq -e '.status == "ok"' "$RUNNER_TEMP/healthz.json" >/dev/null; then
+            echo "::error::Unauthenticated /healthz did not return HTTP 200 with status ok."
+            exit 1
+          fi
+
+          if ! identity_status="$(curl --silent --show-error --output "$RUNNER_TEMP/me.json" --write-out '%{http_code}' "$api_url/api/v1/me")"; then
+            echo "::error::Unauthenticated /api/v1/me request failed."
+            exit 1
+          fi
+          if [[ "$identity_status" != "401" ]]; then
+            echo "::error::Unauthenticated /api/v1/me did not return HTTP 401."
+            exit 1
+          fi
+          echo "Verified allUsers invoker, public /healthz (200), and protected /api/v1/me (401)."
 
       - name: Set up Node.js
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET == 'all'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -137,6 +405,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Build and deploy PWA and Firestore rules
+        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET == 'all'
         working-directory: web
         run: |
           npm ci

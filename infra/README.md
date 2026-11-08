@@ -27,7 +27,7 @@ terraform -chdir=infra/bootstrap-state validate
 
 Keep the bootstrap local state file safe and backed up. It is ignored by Git.
 
-## Main infrastructure apply and deployment
+## Review and deployment workflow
 
 ```powershell
 Copy-Item infra/terraform.tfvars.example infra/terraform.tfvars
@@ -37,14 +37,46 @@ terraform -chdir=infra init -backend-config=backend.hcl
 terraform -chdir=infra plan
 ```
 
-Use **Actions → Apply infrastructure and deploy → Run workflow** on `main`.
-The workflow passes Terraform inputs through `TF_VAR_*` environment variables,
-creates an ignored backend config, runs a plan and applies that saved plan,
-builds the API image, and deploys the PWA.
-The initial Cloud Run revision uses Google's public hello image until this
-workflow replaces it. Firebase Hosting's `/api/**` rewrite requires a public
-Cloud Run invoker binding, but FastAPI verifies a Firebase ID token and the
-configured verified-email allowlist on every API route except `/healthz`.
+Use **Actions → Review and deploy infrastructure → Run workflow** on `main`.
+The protected `production` environment and WIF identity are used in both modes.
+The workflow passes Terraform inputs through `TF_VAR_*` environment variables
+and creates ignored backend configuration files on the ephemeral runner.
+
+1. Dispatch with `mode=plan` and choose `target=api` or `target=all`. The job
+   plans both `infra/bootstrap-iam` and `infra`, but does not apply or deploy.
+   Its workflow summary contains only Terraform resource actions and addresses.
+   It writes the commit, target, workflow run ID, and plan fingerprints to
+   `garmin-trainer/release-plans/` in the Terraform state bucket. That bucket
+   enforces public access prevention. Saved plan files and plan values are not
+   uploaded, added to artifacts, or printed in workflow logs.
+2. Review the exact resource actions and addresses in the completed plan run.
+   Before approving any destructive action, explicitly review its recovery path.
+   Dispatch again on the same commit with `mode=apply`, the same target, and
+   `reviewed_plan_run_id` set to the plan run ID. If a plan contains a delete or
+   replacement, also enable `confirm_destructive` only after that review.
+3. Apply mode loads the private manifest, recomputes both plans, and compares
+   both fingerprints before either Terraform apply. It applies only those plans
+   generated in the apply run. A missing, stale, mismatched, or changed plan
+   aborts before Terraform apply. Terraform output containing plan values is
+   suppressed.
+
+With `target=api`, a successful apply builds and pushes the existing `api/`
+container and updates `garmin-trainer-api`; it does not deploy Firebase Hosting
+or Firestore rules. `target=all` retains the existing broader behavior and also
+builds and deploys the PWA and deny-all Firestore rules. Both targets reconcile
+the Terraform roots before application deployment.
+
+The Cloud Run service has a public `allUsers` invoker binding to support its
+public entry points. This is not anonymous application authorization:
+`/healthz` is intentionally public and minimal, while FastAPI still verifies a
+Firebase ID token and the configured verified-email allowlist on every
+application route such as `/api/v1/me`. After API deployment, the workflow
+checks the invoker binding, verifies unauthenticated `/healthz` returns HTTP 200,
+and verifies unauthenticated `/api/v1/me` returns HTTP 401.
+
+Never run `terraform apply` locally. Apply and deployment must use the protected
+GitHub Actions workflow on `main`; do not dispatch apply until the exact plan
+actions have been reviewed.
 
 The project ID, GitHub owner/repository, and allowlisted e-mail are configuration,
 not secrets. The local `.tfvars` and backend config files are ignored by Git.
@@ -86,8 +118,8 @@ to this repository and `main`, and require approval on the GitHub `production`
 environment. Do not grant project Owner/Editor for convenience.
 
 The GitHub WIF provider is restricted to this repository and the `main` branch.
-`terraform-checks.yml` validates code without GCP credentials. The deployment
-workflows are manual-only (`workflow_dispatch`): first run **Bootstrap Terraform
-IAM**, then run **Apply infrastructure and deploy**. The latter applies the main
-infrastructure plan, then deploys Cloud Run, Firebase Hosting, and deny-all
-Firestore rules. No local apply is part of the process.
+`terraform-checks.yml` validates code without GCP credentials. Deployment is
+manual-only (`workflow_dispatch`) through **Review and deploy infrastructure**.
+Use its plan mode before apply; the apply mode applies only after the reviewed
+plan run, commit, target, and both Terraform fingerprints match. No local apply
+is part of the process.
