@@ -79,6 +79,8 @@ Local verification: API suite 10 passed; Terraform format check and validation p
 
 Implementation and code review are complete locally. The workflow was not pushed or dispatched from this build run; Cloud Run remains unchanged until the reviewed `mode=plan`, `target=api` workflow is run on `main`, its resource actions are inspected, and the matching apply is explicitly dispatched.
 
+After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
+
 ## Plan Change Log
 
 

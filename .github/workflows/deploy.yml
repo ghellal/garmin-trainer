@@ -172,7 +172,12 @@ jobs:
           plan_status=$?
           set -e
           if [[ "$plan_status" -ne 0 && "$plan_status" -ne 2 ]]; then
-            echo "::error::Terraform bootstrap IAM planning failed; sensitive plan output was suppressed."
+            summary="$(grep -m 1 'Error:' "$RUNNER_TEMP/bootstrap-iam-plan.log" | sed -E 's/^.*(Error:)/\1/; s/[[:alnum:]._%+-]+@[[:alnum:].-]+/[redacted-email]/g' || true)"
+            if [[ -n "$summary" ]]; then
+              echo "::error::Terraform bootstrap IAM planning failed: $summary"
+            else
+              echo "::error::Terraform bootstrap IAM planning failed; sensitive plan output was suppressed."
+            fi
             exit 1
           fi
           plan_json="$RUNNER_TEMP/bootstrap-iam-fingerprint.json"
@@ -192,7 +197,12 @@ jobs:
           plan_status=$?
           set -e
           if [[ "$plan_status" -ne 0 && "$plan_status" -ne 2 ]]; then
-            echo "::error::Terraform infrastructure planning failed; sensitive plan output was suppressed."
+            summary="$(grep -m 1 'Error:' "$RUNNER_TEMP/infra-plan.log" | sed -E 's/^.*(Error:)/\1/; s/[[:alnum:]._%+-]+@[[:alnum:].-]+/[redacted-email]/g' || true)"
+            if [[ -n "$summary" ]]; then
+              echo "::error::Terraform infrastructure planning failed: $summary"
+            else
+              echo "::error::Terraform infrastructure planning failed; sensitive plan output was suppressed."
+            fi
             exit 1
           fi
           plan_json="$RUNNER_TEMP/infra-fingerprint.json"

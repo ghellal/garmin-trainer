@@ -23,6 +23,11 @@ def test_plan_mode_is_default_and_only_emits_sanitized_resource_actions() -> Non
     assert "terraform -chdir=infra plan" in step("Plan infrastructure")
     assert "terraform apply" not in step("Plan bootstrap IAM")
     assert "terraform apply" not in step("Plan infrastructure")
+    for name in ("Plan bootstrap IAM", "Plan infrastructure"):
+        failure_handling = step(name)
+        assert "grep -m 1 'Error:'" in failure_handling
+        assert "[redacted-email]" in failure_handling
+        assert "sensitive plan output was suppressed" in failure_handling
 
     summary = step("Publish sanitized resource-action summary")
     assert ".resource_changes[]?" in summary
