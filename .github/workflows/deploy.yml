@@ -232,7 +232,7 @@ jobs:
               echo "::error::Terraform plan summary could not be generated."
               exit 1
             fi
-            printf '### %s\n' "$label" >> "$GITHUB_STEP_SUMMARY"
+            printf '### %s\n' "$label" | tee -a "$GITHUB_STEP_SUMMARY"
             local changes
             changes="$(jq -r '
               [.resource_changes[]?
@@ -243,7 +243,7 @@ jobs:
               | if length == 0 then "No resource changes" else .[] end
             ' "$json_file")"
             while IFS= read -r change; do
-              printf -- '- `%s`\n' "$change" >> "$GITHUB_STEP_SUMMARY"
+              printf -- '- `%s`\n' "$change" | tee -a "$GITHUB_STEP_SUMMARY"
             done <<< "$changes"
           }
           summarize_plan "Bootstrap IAM resource actions" "infra/bootstrap-iam" "$BOOTSTRAP_IAM_PLAN" "$RUNNER_TEMP/bootstrap-iam-plan.json" "$RUNNER_TEMP/bootstrap-iam-show.log"
@@ -262,11 +262,11 @@ jobs:
         run: |
           set -euo pipefail
           bucket="${GCP_PROJECT_ID}-tfstate"
-          if ! access_prevention="$(gcloud storage buckets describe "gs://${bucket}" --format='value(iamConfiguration.publicAccessPrevention)' 2>"$RUNNER_TEMP/bucket-describe.log")"; then
+          if ! access_prevention="$(gcloud storage buckets describe "gs://${bucket}" --format='value(public_access_prevention)' 2>"$RUNNER_TEMP/bucket-describe.log")"; then
             echo "::error::Could not verify the Terraform state bucket access policy."
             exit 1
           fi
-          [[ "$access_prevention" == "enforced" ]] || { echo "::error::Terraform state bucket does not enforce public access prevention."; exit 1; }
+          [[ "$access_prevention" == "enforced" ]] || { echo "::error::Terraform state bucket public access prevention is '$access_prevention', not enforced."; exit 1; }
           manifest="$RUNNER_TEMP/plan-manifest.json"
           jq -n \
             --arg run_id "$GITHUB_RUN_ID" \

@@ -88,6 +88,8 @@ Plan-only run `42536352154` identified the missing `iam.workloadIdentityPools.ge
 
 The `bootstrap-iam` target now plans/applies only the bootstrap IAM root and skips main infrastructure planning, API image deployment, and Hosting. Local tests and validation pass; the next required remote step is a plan-only bootstrap run so the exact IAM grant can be reviewed before any apply.
 
+The first bootstrap-only plan showed sanitized resource actions, but manifest storage stopped because the bucket check used the wrong gcloud output-field name. The workflow now reads the documented `public_access_prevention` field and echoes sanitized resource actions into logs as well as the job summary; no manifest or IAM change was written by that failed plan run.
+
 ## Plan Change Log
 
 

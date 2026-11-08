@@ -45,12 +45,13 @@ and creates ignored backend configuration files on the ephemeral runner.
 1. For initial WIF permissions, dispatch with `mode=plan,target=bootstrap-iam`.
    This plans only `infra/bootstrap-iam`; it does not apply or deploy. Review the
    exact IAM changes, including `roles/iam.workloadIdentityPoolAdmin` for the
-   Terraform-managed WIF pool/provider. Apply only after reviewing the summary,
+   Terraform-managed WIF pool/provider. Apply only after reviewing the sanitized
+   resource-action summary and logs,
    using `mode=apply`, the same target, and `reviewed_plan_run_id` from that run.
 2. After bootstrap IAM succeeds, dispatch with `mode=plan` and choose
    `target=api` or `target=all`. This plans both `infra/bootstrap-iam` and
-   `infra`, but does not apply or deploy. Its workflow summary contains only
-   Terraform resource actions and addresses. It writes the commit, target,
+   `infra`, but does not apply or deploy. Its workflow summary and logs contain
+   only Terraform resource actions and addresses. It writes the commit, target,
    workflow run ID, and plan fingerprints to `garmin-trainer/release-plans/` in
    the Terraform state bucket. That bucket enforces public access prevention.
    Saved plan files and plan values are not uploaded, added to artifacts, or

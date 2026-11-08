@@ -36,10 +36,12 @@ def test_plan_mode_is_default_and_only_emits_sanitized_resource_actions() -> Non
     assert 'then "import"' in summary
     assert ".address" in summary
     assert ".values" not in summary
+    assert 'tee -a "$GITHUB_STEP_SUMMARY"' in summary
     assert "upload-artifact" not in WORKFLOW
 
     manifest = step("Store private plan fingerprints")
-    assert "publicAccessPrevention" in manifest
+    assert "public_access_prevention" in manifest
+    assert "not enforced" in manifest
     assert "schema_version: 1" in manifest
     assert "bootstrap_iam_sha256" in manifest
     assert "infra_sha256" in manifest
