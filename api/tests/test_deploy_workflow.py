@@ -114,12 +114,14 @@ def test_bootstrap_iam_target_stops_before_infrastructure_and_api() -> None:
         "Apply infrastructure plan",
         "Build and push API image",
         "Deploy API image",
-        "Verify public Cloud Run access and API authorization",
     ):
         assert (
             "if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'"
             in step(name)
         )
+    verify = step("Verify public Cloud Run access and API authorization")
+    assert "env.DEPLOY_MODE == 'verify'" in verify
+    assert "env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'" in verify
 
 
 def test_bootstrap_grants_the_wif_pool_role_required_by_main_terraform() -> None:
@@ -130,6 +132,33 @@ def test_bootstrap_grants_the_wif_pool_role_required_by_main_terraform() -> None
         / "main.tf"
     ).read_text(encoding="utf-8")
     assert '"roles/iam.workloadIdentityPoolAdmin"' in bootstrap_iam
+
+
+def test_verify_mode_is_read_only_and_checks_the_live_api() -> None:
+    assert "- verify" in WORKFLOW
+    assert "Verify mode is available for the API target only." in step(
+        "Require deployment configuration"
+    )
+    assert "if: env.DEPLOY_MODE != 'verify'" in step("Set up Terraform")
+    assert "if: env.DEPLOY_MODE != 'verify'" in step(
+        "Generate Terraform backend configuration"
+    )
+    verify = step("Verify public Cloud Run access and API authorization")
+    assert "env.DEPLOY_MODE == 'verify'" in verify
+    assert "for attempt in {1..10}" in verify
+    assert 'HTTP ${health_status}' in verify
+    assert "terraform apply" not in verify
+    assert "always() && env.DEPLOY_MODE == 'apply'" in step(
+        "Remove applied Terraform plan objects"
+    )
+
+
+def test_applied_plans_are_cleaned_even_if_post_deploy_checks_fail() -> None:
+    cleanup = step("Remove applied Terraform plan objects")
+    assert "always()" in cleanup
+    assert "steps.apply_bootstrap_iam.outcome == 'success'" in cleanup
+    assert "steps.apply_infrastructure.outcome == 'success'" in cleanup
+    assert "--all-versions" in cleanup
 
 
 def test_budget_uses_billing_account_currency() -> None:

@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Plan for review, or apply a matching reviewed plan
+        description: Plan for review, apply a reviewed plan, or verify the live API
         type: choice
         options:
           - plan
           - apply
+          - verify
         default: plan
         required: true
       target:
@@ -81,10 +82,14 @@ jobs:
           : "${GCP_TERRAFORM_SERVICE_ACCOUNT:?Set GitHub variable GCP_TERRAFORM_SERVICE_ACCOUNT}"
           : "${GCP_BILLING_ACCOUNT_ID:?Set GitHub variable GCP_BILLING_ACCOUNT_ID}"
           : "${ALLOWED_USER_EMAIL:?Set GitHub secret ALLOWED_USER_EMAIL}"
-          [[ "$DEPLOY_MODE" == "plan" || "$DEPLOY_MODE" == "apply" ]] || { echo "::error::Invalid mode."; exit 1; }
+          [[ "$DEPLOY_MODE" == "plan" || "$DEPLOY_MODE" == "apply" || "$DEPLOY_MODE" == "verify" ]] || { echo "::error::Invalid mode."; exit 1; }
           [[ "$DEPLOY_TARGET" == "bootstrap-iam" || "$DEPLOY_TARGET" == "api" || "$DEPLOY_TARGET" == "all" ]] || { echo "::error::Invalid target."; exit 1; }
           if [[ "$DEPLOY_MODE" == "apply" ]]; then
             [[ "$REVIEWED_PLAN_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Apply requires a numeric reviewed_plan_run_id."; exit 1; }
+          fi
+          if [[ "$DEPLOY_MODE" == "verify" && "$DEPLOY_TARGET" != "api" ]]; then
+            echo "::error::Verify mode is available for the API target only."
+            exit 1
           fi
 
       - name: Authenticate to Google Cloud with WIF
@@ -100,11 +105,13 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
 
       - name: Set up Terraform
+        if: env.DEPLOY_MODE != 'verify'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.16.6
 
       - name: Generate Terraform backend configuration
+        if: env.DEPLOY_MODE != 'verify'
         shell: bash
         run: |
           set -euo pipefail
@@ -174,9 +181,11 @@ jobs:
           fi
 
       - name: Terraform format and validate
+        if: env.DEPLOY_MODE != 'verify'
         run: terraform fmt -check -recursive infra
 
       - name: Initialize and validate Terraform roots
+        if: env.DEPLOY_MODE != 'verify'
         shell: bash
         run: |
           set -euo pipefail
@@ -350,6 +359,7 @@ jobs:
 
       - name: Apply bootstrap IAM plan
         if: env.DEPLOY_MODE == 'apply'
+        id: apply_bootstrap_iam
         shell: bash
         run: |
           set -euo pipefail
@@ -365,6 +375,7 @@ jobs:
 
       - name: Apply infrastructure plan
         if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
+        id: apply_infrastructure
         shell: bash
         run: |
           set -euo pipefail
@@ -417,7 +428,7 @@ jobs:
           echo "Cloud Run API image updated."
 
       - name: Verify public Cloud Run access and API authorization
-        if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam'
+        if: env.DEPLOY_MODE == 'verify' || (env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET != 'bootstrap-iam')
         shell: bash
         run: |
           set -euo pipefail
@@ -438,21 +449,33 @@ jobs:
             echo "::error::Cloud Run service URL could not be read."
             exit 1
           fi
-          if ! health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/healthz.json" --write-out '%{http_code}' "$api_url/healthz")"; then
-            echo "::error::Unauthenticated /healthz request failed."
-            exit 1
-          fi
-          if [[ "$health_status" != "200" ]] || ! jq -e '.status == "ok"' "$RUNNER_TEMP/healthz.json" >/dev/null; then
-            echo "::error::Unauthenticated /healthz did not return HTTP 200 with status ok."
+          health_status="000"
+          health_ok=false
+          for attempt in {1..10}; do
+            if ! health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/healthz.json" --write-out '%{http_code}' --max-time 10 "$api_url/healthz" 2>"$RUNNER_TEMP/healthz-curl.log")"; then
+              health_status="000"
+            fi
+            if [[ "$health_status" == "200" ]]; then
+              if jq -e '.status == "ok"' "$RUNNER_TEMP/healthz.json" >/dev/null; then
+                health_ok=true
+              fi
+              break
+            fi
+            if [[ "$health_status" != "000" && "$health_status" != 5?? ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$health_ok" != "true" ]]; then
+            echo "::error::Unauthenticated /healthz verification failed with HTTP ${health_status} after ${attempt} attempt(s)."
             exit 1
           fi
 
-          if ! identity_status="$(curl --silent --show-error --output "$RUNNER_TEMP/me.json" --write-out '%{http_code}' "$api_url/api/v1/me")"; then
-            echo "::error::Unauthenticated /api/v1/me request failed."
-            exit 1
+          if ! identity_status="$(curl --silent --show-error --output "$RUNNER_TEMP/me.json" --write-out '%{http_code}' --max-time 10 "$api_url/api/v1/me" 2>"$RUNNER_TEMP/me-curl.log")"; then
+            identity_status="000"
           fi
           if [[ "$identity_status" != "401" ]]; then
-            echo "::error::Unauthenticated /api/v1/me did not return HTTP 401."
+            echo "::error::Unauthenticated /api/v1/me returned HTTP ${identity_status}, expected 401."
             exit 1
           fi
           echo "Verified allUsers invoker, public /healthz (200), and protected /api/v1/me (401)."
@@ -474,7 +497,7 @@ jobs:
           npx firebase deploy --only hosting,firestore:rules --project "$GCP_PROJECT_ID" --non-interactive
 
       - name: Remove applied Terraform plan objects
-        if: env.DEPLOY_MODE == 'apply' && success()
+        if: ${{ always() && env.DEPLOY_MODE == 'apply' && steps.apply_bootstrap_iam.outcome == 'success' && (env.DEPLOY_TARGET == 'bootstrap-iam' || steps.apply_infrastructure.outcome == 'success') }}
         shell: bash
         run: |
           set -euo pipefail

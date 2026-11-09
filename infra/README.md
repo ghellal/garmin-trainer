@@ -63,10 +63,15 @@ and creates ignored backend configuration files on the ephemeral runner.
    replacement, also enable `confirm_destructive` only after that review.
    Apply mode loads the private manifest, rejects plans older than 24 hours,
    downloads the saved plan files, verifies their checksums, then applies those
-   exact bytes. A missing, expired, or mismatched plan aborts before Terraform
-   apply. After a fully successful deployment, the workflow removes all stored
-   object versions for that plan run. If a plan is never applied or deployment
-   fails, its files remain private in the bucket until cleaned up.
+    exact bytes. A missing, expired, or mismatched plan aborts before Terraform
+    apply. After a fully successful deployment, the workflow removes all stored
+    object versions for that plan run. If a plan is never applied or deployment
+    fails, its files remain private in the bucket until cleaned up.
+
+Use `mode=verify,target=api` to recheck a live Cloud Run service without applying
+Terraform or rebuilding the image. This read-only mode checks the `allUsers`
+invoker binding, retries transient health-check failures, and confirms that
+unauthenticated `/healthz` returns 200 while `/api/v1/me` still returns 401.
 
 With `target=api`, a successful apply builds and pushes the existing `api/`
 container and updates `garmin-trainer-api`; it does not deploy Firebase Hosting
