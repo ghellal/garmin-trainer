@@ -147,6 +147,8 @@ def test_verify_mode_is_read_only_and_checks_the_live_api() -> None:
     assert "env.DEPLOY_MODE == 'verify'" in verify
     assert "for attempt in {1..10}" in verify
     assert 'HTTP ${health_status}' in verify
+    assert "Cloud Run URL:" in verify
+    assert verify.index("/api/v1/me") < verify.index("if [[ \"$health_ok\"")
     assert "terraform apply" not in verify
     assert "always() && env.DEPLOY_MODE == 'apply'" in step(
         "Remove applied Terraform plan objects"

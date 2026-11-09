@@ -80,13 +80,13 @@ Added workflow guard tests using the Python standard library and the existing AP
 
 Local verification: API suite 13 passed; Terraform format check and validation passed for `infra`, `infra/bootstrap-iam`, and `infra/bootstrap-state`; workflow YAML parsed and all 19 multiline Bash steps passed `bash -n`; `git diff --check` passed.
 
-The deployment workflow is pushed to `main`; bootstrap IAM and main infrastructure apply completed, and the API image was deployed. The live public-health check failed; no PWA/Hosting deployment occurred. The read-only `mode=verify,target=api` path is being added to expose the HTTP status without another apply.
+The deployment workflow is pushed to `main`; bootstrap IAM and main infrastructure apply completed, and the API image was deployed. The live public-health check failed; no PWA/Hosting deployment occurred. A read-only `mode=verify,target=api` path is being added to diagnose the service without another apply.
 
 Apply run `42651323812` applied bootstrap IAM successfully but failed during the main infrastructure apply; the API image and Cloud Run deployment steps were skipped. Terraform may have partially applied main-root changes. The detailed apply log was on the ephemeral runner, so the workflow now emits only a sanitized first error summary on apply failure; the next operation must be a fresh plan-only run to reconcile current state.
 
 Run `42652230010` then failed while creating the optional billing budget with HTTP 400 because the Terraform config forced `USD`, which can differ from the billing account's currency. The budget now omits an explicit currency code and interprets its threshold in the billing account's currency; `GCP_MONTHLY_BUDGET_AMOUNT` is the new name, with the old variable accepted as a compatibility alias. No API image was built or deployed.
 
-Apply run `42653745213` successfully applied the Terraform plan and deployed the API image, but its post-deploy check failed on `/healthz`; the Cloud Run invoker-policy check had passed. The endpoint's HTTP status/body was not logged, so a read-only `mode=verify,target=api` now retries transient failures and reports the status code without exposing response contents.
+Apply run `42653745213` successfully applied the Terraform plan and deployed the API image, but its post-deploy check failed on `/healthz`; the Cloud Run invoker-policy check had passed. Read-only run `42655084780` then returned HTTP 404 for `/healthz`; it stopped before checking `/api/v1/me`. The verification mode now reports the Cloud Run URL and both route statuses, with retries for transient health failures and no response-body logging.
 
 After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
 

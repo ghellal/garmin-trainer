@@ -449,6 +449,7 @@ jobs:
             echo "::error::Cloud Run service URL could not be read."
             exit 1
           fi
+          printf 'Cloud Run URL: `%s`\n' "$api_url" | tee -a "$GITHUB_STEP_SUMMARY"
           health_status="000"
           health_ok=false
           for attempt in {1..10}; do
@@ -466,16 +467,11 @@ jobs:
             fi
             sleep 5
           done
-          if [[ "$health_ok" != "true" ]]; then
-            echo "::error::Unauthenticated /healthz verification failed with HTTP ${health_status} after ${attempt} attempt(s)."
-            exit 1
-          fi
-
           if ! identity_status="$(curl --silent --show-error --output "$RUNNER_TEMP/me.json" --write-out '%{http_code}' --max-time 10 "$api_url/api/v1/me" 2>"$RUNNER_TEMP/me-curl.log")"; then
             identity_status="000"
           fi
-          if [[ "$identity_status" != "401" ]]; then
-            echo "::error::Unauthenticated /api/v1/me returned HTTP ${identity_status}, expected 401."
+          if [[ "$health_ok" != "true" || "$identity_status" != "401" ]]; then
+            echo "::error::Unauthenticated checks returned /healthz HTTP ${health_status} (expected 200/status ok) and /api/v1/me HTTP ${identity_status} (expected 401)."
             exit 1
           fi
           echo "Verified allUsers invoker, public /healthz (200), and protected /api/v1/me (401)."
