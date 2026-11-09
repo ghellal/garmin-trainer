@@ -470,6 +470,13 @@ jobs:
           if ! identity_status="$(curl --silent --show-error --output "$RUNNER_TEMP/me.json" --write-out '%{http_code}' --max-time 10 "$api_url/api/v1/me" 2>"$RUNNER_TEMP/me-curl.log")"; then
             identity_status="000"
           fi
+          openapi_status="000"
+          openapi_paths="unavailable"
+          if openapi_status="$(curl --silent --show-error --output "$RUNNER_TEMP/openapi.json" --write-out '%{http_code}' --max-time 10 "$api_url/openapi.json" 2>"$RUNNER_TEMP/openapi-curl.log")" && [[ "$openapi_status" == "200" ]]; then
+            openapi_paths="$(jq -r '.paths | keys | join(", ")' "$RUNNER_TEMP/openapi.json" 2>/dev/null || echo "invalid schema")"
+          fi
+          printf 'Observed endpoints: `/healthz` HTTP %s; `/api/v1/me` HTTP %s; `/openapi.json` HTTP %s; paths: %s\n' \
+            "$health_status" "$identity_status" "$openapi_status" "$openapi_paths" | tee -a "$GITHUB_STEP_SUMMARY"
           if [[ "$health_ok" != "true" || "$identity_status" != "401" ]]; then
             echo "::error::Unauthenticated checks returned /healthz HTTP ${health_status} (expected 200/status ok) and /api/v1/me HTTP ${identity_status} (expected 401)."
             exit 1

@@ -88,6 +88,8 @@ Run `42652230010` then failed while creating the optional billing budget with HT
 
 Apply run `42653745213` successfully applied the Terraform plan and deployed the API image, but its post-deploy check failed on `/healthz`; the Cloud Run invoker-policy check had passed. Read-only run `42655084780` then returned HTTP 404 for `/healthz`; it stopped before checking `/api/v1/me`. The verification mode now reports the Cloud Run URL and both route statuses, with retries for transient health failures and no response-body logging.
 
+Read-only verification run `42655084780` confirmed `/api/v1/me` returns the expected HTTP 401 while `/healthz` returns 404. The verify step now also reports the registered OpenAPI path names so the health-route mismatch can be diagnosed without exposing response bodies or applying infrastructure again.
+
 After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
 
 Plan-only run `42536352154` identified the missing `iam.workloadIdentityPools.get` permission while reading the imported WIF pool. The workflow now supports a bootstrap-only target, and `infra/bootstrap-iam` grants `roles/iam.workloadIdentityPoolAdmin`; the approved bootstrap IAM plan was applied successfully in run `42537682219`.
