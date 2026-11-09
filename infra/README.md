@@ -46,26 +46,27 @@ and creates ignored backend configuration files on the ephemeral runner.
    This plans only `infra/bootstrap-iam`; it does not apply or deploy. Review the
    exact IAM changes, including `roles/iam.workloadIdentityPoolAdmin` for the
    Terraform-managed WIF pool/provider. Apply only after reviewing the sanitized
-   resource-action summary and logs,
-   using `mode=apply`, the same target, and `reviewed_plan_run_id` from that run.
+   resource-action summary and logs, using `mode=apply`, the same target, and
+   `reviewed_plan_run_id` from that run.
 2. After bootstrap IAM succeeds, dispatch with `mode=plan` and choose
    `target=api` or `target=all`. This plans both `infra/bootstrap-iam` and
    `infra`, but does not apply or deploy. Its workflow summary and logs contain
-   only Terraform resource actions and addresses. It writes the commit, target,
-   workflow run ID, and plan fingerprints to `garmin-trainer/release-plans/` in
-   the Terraform state bucket. That bucket enforces public access prevention.
-   Saved plan files and plan values are not uploaded, added to artifacts, or
-   printed in workflow logs.
+   only Terraform resource actions and addresses. It writes the exact saved
+   plans plus a manifest (commit, target, run ID, expiry, and checksums) under
+   `garmin-trainer/release-plans/` in the Terraform state bucket. That bucket
+   enforces public access prevention. Plan files can contain sensitive values;
+   they are never uploaded to GitHub artifacts or printed in workflow logs.
 3. Review the exact resource actions and addresses in the completed plan run.
    Before approving any destructive action, explicitly review its recovery path.
    Dispatch again on the same commit with `mode=apply`, the same target, and
    `reviewed_plan_run_id` set to the plan run ID. If a plan contains a delete or
    replacement, also enable `confirm_destructive` only after that review.
-   Apply mode loads the private manifest, recomputes the relevant plan(s), and
-   compares fingerprints before any Terraform apply. It applies only plans
-   generated in the apply run. A missing, stale, mismatched, or changed plan
-   aborts before Terraform apply. Terraform output containing plan values is
-   suppressed.
+   Apply mode loads the private manifest, rejects plans older than 24 hours,
+   downloads the saved plan files, verifies their checksums, then applies those
+   exact bytes. A missing, expired, or mismatched plan aborts before Terraform
+   apply. After a fully successful deployment, the workflow removes all stored
+   object versions for that plan run. If a plan is never applied or deployment
+   fails, its files remain private in the bucket until cleaned up.
 
 With `target=api`, a successful apply builds and pushes the existing `api/`
 container and updates `garmin-trainer-api`; it does not deploy Firebase Hosting

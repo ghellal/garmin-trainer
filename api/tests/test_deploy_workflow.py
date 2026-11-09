@@ -39,40 +39,48 @@ def test_plan_mode_is_default_and_only_emits_sanitized_resource_actions() -> Non
     assert 'tee -a "$GITHUB_STEP_SUMMARY"' in summary
     assert "upload-artifact" not in WORKFLOW
 
-    manifest = step("Store private plan fingerprints")
+    manifest = step("Store private reviewed Terraform plans")
     assert "public_access_prevention" in manifest
     assert "not enforced" in manifest
-    assert "schema_version: 1" in manifest
+    assert "schema_version: 2" in manifest
+    assert "created_at_epoch" in manifest
     assert "bootstrap_iam_sha256" in manifest
     assert "infra_sha256" in manifest
-    assert "BOOTSTRAP_IAM_PLAN" not in manifest
-    assert "INFRA_PLAN" not in manifest
+    assert '"$BOOTSTRAP_IAM_PLAN"' in manifest
+    assert '"$INFRA_PLAN"' in manifest
+    assert "if-generation-match=0" in manifest
+    assert "upload-artifact" not in WORKFLOW
 
 
 def test_apply_is_bound_to_reviewed_commit_and_plan_before_any_apply() -> None:
     load_manifest = step("Load reviewed plan manifest")
+    assert ".schema_version == 2" in load_manifest
     assert ".plan_run_id == $run_id" in load_manifest
     assert ".commit == $commit" in load_manifest
     assert ".target == $target" in load_manifest
+    assert "age_seconds > 86400" in load_manifest
+    assert '"${plan_prefix}/bootstrap-iam.tfplan"' in load_manifest
+    assert '"${plan_prefix}/infra.tfplan"' in load_manifest
 
-    for name in ("Plan bootstrap IAM", "Plan infrastructure"):
-        fingerprint = step(name)
-        assert "resource_changes: [.resource_changes[]?" in fingerprint
-        assert "after: .change.after" in fingerprint
-        assert ".change.before" not in fingerprint
-        assert "output_changes: .output_changes" in fingerprint
-        assert "checks: .checks" in fingerprint
+    assert "if: env.DEPLOY_MODE == 'plan'" in step("Plan bootstrap IAM")
+    assert "if: env.DEPLOY_MODE == 'plan'" in step("Plan infrastructure")
+    verify = step("Verify reviewed plan files")
+    assert 'sha256sum "$BOOTSTRAP_IAM_PLAN"' in verify
+    assert 'sha256sum "$INFRA_PLAN"' in verify
     assert 'if [[ "$CONFIRM_DESTRUCTIVE" != "true" ]]' in step(
         "Require destructive-change review"
     )
 
-    verify = WORKFLOW.index("      - name: Verify reviewed plan fingerprints")
+    verify_index = WORKFLOW.index("      - name: Verify reviewed plan files")
     review_deletes = WORKFLOW.index("      - name: Require destructive-change review")
     apply_bootstrap = WORKFLOW.index("      - name: Apply bootstrap IAM plan")
     apply_infra = WORKFLOW.index("      - name: Apply infrastructure plan")
-    assert verify < review_deletes < apply_bootstrap < apply_infra
+    assert verify_index < review_deletes < apply_bootstrap < apply_infra
     assert "if: env.DEPLOY_MODE == 'apply'" in step("Apply bootstrap IAM plan")
     assert "if: env.DEPLOY_MODE == 'apply'" in step("Apply infrastructure plan")
+    assert "gcloud storage rm --quiet --all-versions" in step(
+        "Remove applied Terraform plan objects"
+    )
 
 
 def test_api_only_target_does_not_deploy_firebase_hosting() -> None:
@@ -88,12 +96,12 @@ def test_api_only_target_does_not_deploy_firebase_hosting() -> None:
 def test_bootstrap_iam_target_stops_before_infrastructure_and_api() -> None:
     assert "- bootstrap-iam" in WORKFLOW
     assert (
-        "if: env.DEPLOY_TARGET != 'bootstrap-iam'"
+        "if: env.DEPLOY_MODE == 'plan' && env.DEPLOY_TARGET != 'bootstrap-iam'"
         in step("Plan infrastructure")
     )
     assert '.infra_sha256 == "not-applicable"' in step("Load reviewed plan manifest")
-    assert 'if [[ "$DEPLOY_TARGET" != "bootstrap-iam" &&' in step(
-        "Verify reviewed plan fingerprints"
+    assert 'if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]' in step(
+        "Verify reviewed plan files"
     )
     assert 'if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]' in step(
         "Require destructive-change review"

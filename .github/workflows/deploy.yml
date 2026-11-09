@@ -131,7 +131,8 @@ jobs:
           set -euo pipefail
           bucket="${GCP_PROJECT_ID}-tfstate"
           manifest="$RUNNER_TEMP/reviewed-plan.json"
-          object="gs://${bucket}/garmin-trainer/release-plans/${REVIEWED_PLAN_RUN_ID}.json"
+          plan_prefix="gs://${bucket}/garmin-trainer/release-plans/${REVIEWED_PLAN_RUN_ID}"
+          object="${plan_prefix}/manifest.json"
           if ! gcloud storage cp --quiet "$object" "$manifest" >"$RUNNER_TEMP/manifest-download.log" 2>&1; then
             echo "::error::Reviewed plan manifest could not be loaded from the private state bucket."
             exit 1
@@ -140,10 +141,11 @@ jobs:
             --arg run_id "$REVIEWED_PLAN_RUN_ID" \
             --arg commit "$GITHUB_SHA" \
             --arg target "$DEPLOY_TARGET" \
-            '.schema_version == 1 and
+            '.schema_version == 2 and
              .plan_run_id == $run_id and
              .commit == $commit and
              .target == $target and
+             (.created_at_epoch | type == "number") and
              (.bootstrap_iam_sha256 | test("^[a-f0-9]{64}$")) and
              (if $target == "bootstrap-iam" then .infra_sha256 == "not-applicable"
               else (.infra_sha256 | test("^[a-f0-9]{64}$")) end)' \
@@ -151,8 +153,25 @@ jobs:
             echo "::error::Reviewed plan is missing, stale, or does not match this commit and target."
             exit 1
           fi
+          created_at_epoch="$(jq -r '.created_at_epoch' "$manifest")"
+          now_epoch="$(date -u +%s)"
+          age_seconds=$((now_epoch - created_at_epoch))
+          if (( age_seconds < 0 || age_seconds > 86400 )); then
+            echo "::error::Reviewed Terraform plans have expired; create a new plan run."
+            exit 1
+          fi
           echo "REVIEWED_BOOTSTRAP_IAM_SHA256=$(jq -r '.bootstrap_iam_sha256' "$manifest")" >> "$GITHUB_ENV"
           echo "REVIEWED_INFRA_SHA256=$(jq -r '.infra_sha256' "$manifest")" >> "$GITHUB_ENV"
+          if ! gcloud storage cp --quiet "${plan_prefix}/bootstrap-iam.tfplan" "$BOOTSTRAP_IAM_PLAN" >"$RUNNER_TEMP/bootstrap-plan-download.log" 2>&1; then
+            echo "::error::Reviewed bootstrap IAM plan file could not be downloaded."
+            exit 1
+          fi
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            if ! gcloud storage cp --quiet "${plan_prefix}/infra.tfplan" "$INFRA_PLAN" >"$RUNNER_TEMP/infra-plan-download.log" 2>&1; then
+              echo "::error::Reviewed infrastructure plan file could not be downloaded."
+              exit 1
+            fi
+          fi
 
       - name: Terraform format and validate
         run: terraform fmt -check -recursive infra
@@ -167,6 +186,7 @@ jobs:
           terraform -chdir=infra validate
 
       - name: Plan bootstrap IAM
+        if: env.DEPLOY_MODE == 'plan'
         shell: bash
         run: |
           set -euo pipefail
@@ -183,29 +203,11 @@ jobs:
             fi
             exit 1
           fi
-          plan_json="$RUNNER_TEMP/bootstrap-iam-fingerprint.json"
-          if ! terraform -chdir=infra/bootstrap-iam show -json "$BOOTSTRAP_IAM_PLAN" >"$plan_json" 2>"$RUNNER_TEMP/bootstrap-iam-fingerprint.log"; then
-            echo "::error::Bootstrap IAM plan fingerprint could not be generated."
-            exit 1
-          fi
-          fingerprint="$(jq -S -c '
-            {
-              resource_changes: [.resource_changes[]? | {
-                address, mode, type, name, index, deposed,
-                actions: .change.actions,
-                after: .change.after,
-                after_sensitive: .change.after_sensitive,
-                after_unknown: .change.after_unknown,
-                importing: .change.importing
-              }],
-              output_changes: .output_changes,
-              checks: .checks
-            }
-          ' "$plan_json" | sha256sum | cut -d' ' -f1)"
+          fingerprint="$(sha256sum "$BOOTSTRAP_IAM_PLAN" | cut -d' ' -f1)"
           echo "BOOTSTRAP_IAM_SHA256=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Plan infrastructure
-        if: env.DEPLOY_TARGET != 'bootstrap-iam'
+        if: env.DEPLOY_MODE == 'plan' && env.DEPLOY_TARGET != 'bootstrap-iam'
         shell: bash
         run: |
           set -euo pipefail
@@ -222,25 +224,7 @@ jobs:
             fi
             exit 1
           fi
-          plan_json="$RUNNER_TEMP/infra-fingerprint.json"
-          if ! terraform -chdir=infra show -json "$INFRA_PLAN" >"$plan_json" 2>"$RUNNER_TEMP/infra-fingerprint.log"; then
-            echo "::error::Infrastructure plan fingerprint could not be generated."
-            exit 1
-          fi
-          fingerprint="$(jq -S -c '
-            {
-              resource_changes: [.resource_changes[]? | {
-                address, mode, type, name, index, deposed,
-                actions: .change.actions,
-                after: .change.after,
-                after_sensitive: .change.after_sensitive,
-                after_unknown: .change.after_unknown,
-                importing: .change.importing
-              }],
-              output_changes: .output_changes,
-              checks: .checks
-            }
-          ' "$plan_json" | sha256sum | cut -d' ' -f1)"
+          fingerprint="$(sha256sum "$INFRA_PLAN" | cut -d' ' -f1)"
           echo "INFRA_SHA256=$fingerprint" >> "$GITHUB_ENV"
 
       - name: Publish sanitized resource-action summary
@@ -282,7 +266,7 @@ jobs:
             printf 'No resources were applied. To continue, dispatch apply on this same commit and target, using this plan run ID.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Store private plan fingerprints
+      - name: Store private reviewed Terraform plans
         if: env.DEPLOY_MODE == 'plan'
         shell: bash
         run: |
@@ -293,33 +277,50 @@ jobs:
             exit 1
           fi
           [[ "$access_prevention" == "enforced" ]] || { echo "::error::Terraform state bucket public access prevention is '$access_prevention', not enforced."; exit 1; }
+          plan_prefix="gs://${bucket}/garmin-trainer/release-plans/${GITHUB_RUN_ID}"
+          if ! gcloud storage cp --quiet --if-generation-match=0 "$BOOTSTRAP_IAM_PLAN" "${plan_prefix}/bootstrap-iam.tfplan" >"$RUNNER_TEMP/bootstrap-plan-upload.log" 2>&1; then
+            echo "::error::Bootstrap IAM plan could not be stored in the private state bucket; no apply was run."
+            exit 1
+          fi
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            if ! gcloud storage cp --quiet --if-generation-match=0 "$INFRA_PLAN" "${plan_prefix}/infra.tfplan" >"$RUNNER_TEMP/infra-plan-upload.log" 2>&1; then
+              echo "::error::Infrastructure plan could not be stored in the private state bucket; no apply was run."
+              exit 1
+            fi
+          fi
           manifest="$RUNNER_TEMP/plan-manifest.json"
+          created_at_epoch="$(date -u +%s)"
           jq -n \
             --arg run_id "$GITHUB_RUN_ID" \
             --arg commit "$GITHUB_SHA" \
             --arg target "$DEPLOY_TARGET" \
+            --argjson created_at_epoch "$created_at_epoch" \
             --arg bootstrap_iam_sha256 "$BOOTSTRAP_IAM_SHA256" \
             --arg infra_sha256 "$INFRA_SHA256" \
-            '{schema_version: 1, plan_run_id: $run_id, commit: $commit, target: $target, bootstrap_iam_sha256: $bootstrap_iam_sha256, infra_sha256: $infra_sha256}' \
+            '{schema_version: 2, plan_run_id: $run_id, commit: $commit, target: $target, created_at_epoch: $created_at_epoch, bootstrap_iam_sha256: $bootstrap_iam_sha256, infra_sha256: $infra_sha256}' \
             > "$manifest"
-          object="gs://${bucket}/garmin-trainer/release-plans/${GITHUB_RUN_ID}.json"
+          object="${plan_prefix}/manifest.json"
           if ! gcloud storage cp --quiet --if-generation-match=0 "$manifest" "$object" >"$RUNNER_TEMP/manifest-upload.log" 2>&1; then
-            echo "::error::Private plan fingerprint manifest could not be stored; no apply was run. Start a new plan run if this run ID was already used."
+            echo "::error::Private plan manifest could not be stored; no apply was run. Start a new plan run if this run ID was already used."
             exit 1
           fi
 
-      - name: Verify reviewed plan fingerprints
+      - name: Verify reviewed plan files
         if: env.DEPLOY_MODE == 'apply'
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$BOOTSTRAP_IAM_SHA256" != "$REVIEWED_BOOTSTRAP_IAM_SHA256" ]]; then
-            echo "::error::Bootstrap IAM plan fingerprint changed; no Terraform plan was applied. Review a new plan run."
+          bootstrap_sha256="$(sha256sum "$BOOTSTRAP_IAM_PLAN" | cut -d' ' -f1)"
+          if [[ "$bootstrap_sha256" != "$REVIEWED_BOOTSTRAP_IAM_SHA256" ]]; then
+            echo "::error::Downloaded bootstrap IAM plan checksum does not match the reviewed plan; no Terraform plan was applied."
             exit 1
           fi
-          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" && "$INFRA_SHA256" != "$REVIEWED_INFRA_SHA256" ]]; then
-            echo "::error::Terraform plan fingerprints changed; neither Terraform plan was applied. Review a new plan run."
-            exit 1
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            infra_sha256="$(sha256sum "$INFRA_PLAN" | cut -d' ' -f1)"
+            if [[ "$infra_sha256" != "$REVIEWED_INFRA_SHA256" ]]; then
+              echo "::error::Downloaded infrastructure plan checksum does not match the reviewed plan; no Terraform plan was applied."
+              exit 1
+            fi
           fi
 
       - name: Require destructive-change review
@@ -461,3 +462,18 @@ jobs:
           npm ci
           npm run build
           npx firebase deploy --only hosting,firestore:rules --project "$GCP_PROJECT_ID" --non-interactive
+
+      - name: Remove applied Terraform plan objects
+        if: env.DEPLOY_MODE == 'apply' && success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          bucket="${GCP_PROJECT_ID}-tfstate"
+          plan_prefix="gs://${bucket}/garmin-trainer/release-plans/${REVIEWED_PLAN_RUN_ID}"
+          objects=("${plan_prefix}/bootstrap-iam.tfplan" "${plan_prefix}/manifest.json")
+          if [[ "$DEPLOY_TARGET" != "bootstrap-iam" ]]; then
+            objects+=("${plan_prefix}/infra.tfplan")
+          fi
+          if ! gcloud storage rm --quiet --all-versions "${objects[@]}" >"$RUNNER_TEMP/plan-cleanup.log" 2>&1; then
+            echo "::warning::Applied plan objects could not be fully removed; they remain private in the state bucket."
+          fi
