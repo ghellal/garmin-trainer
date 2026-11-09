@@ -70,6 +70,10 @@ def test_apply_is_bound_to_reviewed_commit_and_plan_before_any_apply() -> None:
     assert 'if [[ "$CONFIRM_DESTRUCTIVE" != "true" ]]' in step(
         "Require destructive-change review"
     )
+    for name in ("Apply bootstrap IAM plan", "Apply infrastructure plan"):
+        failure_handling = step(name)
+        assert "grep -m 1 'Error:'" in failure_handling
+        assert "[redacted-email]" in failure_handling
 
     verify_index = WORKFLOW.index("      - name: Verify reviewed plan files")
     review_deletes = WORKFLOW.index("      - name: Require destructive-change review")

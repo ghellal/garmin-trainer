@@ -354,7 +354,12 @@ jobs:
         run: |
           set -euo pipefail
           if ! terraform -chdir=infra/bootstrap-iam apply -input=false "$BOOTSTRAP_IAM_PLAN" >"$RUNNER_TEMP/bootstrap-iam-apply.log" 2>&1; then
-            echo "::error::Bootstrap IAM apply failed; Terraform output was suppressed."
+            summary="$(grep -m 1 'Error:' "$RUNNER_TEMP/bootstrap-iam-apply.log" | sed -E 's/^.*(Error:)/\1/; s/[[:alnum:]._%+-]+@[[:alnum:].-]+/[redacted-email]/g' || true)"
+            if [[ -n "$summary" ]]; then
+              echo "::error::Bootstrap IAM apply failed: $summary"
+            else
+              echo "::error::Bootstrap IAM apply failed; Terraform output was suppressed."
+            fi
             exit 1
           fi
 
@@ -364,7 +369,12 @@ jobs:
         run: |
           set -euo pipefail
           if ! terraform -chdir=infra apply -input=false "$INFRA_PLAN" >"$RUNNER_TEMP/infra-apply.log" 2>&1; then
-            echo "::error::Infrastructure apply failed; Terraform output was suppressed."
+            summary="$(grep -m 1 'Error:' "$RUNNER_TEMP/infra-apply.log" | sed -E 's/^.*(Error:)/\1/; s/[[:alnum:]._%+-]+@[[:alnum:].-]+/[redacted-email]/g' || true)"
+            if [[ -n "$summary" ]]; then
+              echo "::error::Infrastructure apply failed: $summary"
+            else
+              echo "::error::Infrastructure apply failed; Terraform output was suppressed."
+            fi
             exit 1
           fi
 
