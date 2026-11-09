@@ -453,11 +453,11 @@ jobs:
           health_status="000"
           health_ok=false
           for attempt in {1..10}; do
-            if ! health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/healthz.json" --write-out '%{http_code}' --max-time 10 "$api_url/healthz" 2>"$RUNNER_TEMP/healthz-curl.log")"; then
+            if ! health_status="$(curl --silent --show-error --output "$RUNNER_TEMP/health.json" --write-out '%{http_code}' --max-time 10 "$api_url/health" 2>"$RUNNER_TEMP/health-curl.log")"; then
               health_status="000"
             fi
             if [[ "$health_status" == "200" ]]; then
-              if jq -e '.status == "ok"' "$RUNNER_TEMP/healthz.json" >/dev/null; then
+              if jq -e '.status == "ok"' "$RUNNER_TEMP/health.json" >/dev/null; then
                 health_ok=true
               fi
               break
@@ -475,13 +475,13 @@ jobs:
           if openapi_status="$(curl --silent --show-error --output "$RUNNER_TEMP/openapi.json" --write-out '%{http_code}' --max-time 10 "$api_url/openapi.json" 2>"$RUNNER_TEMP/openapi-curl.log")" && [[ "$openapi_status" == "200" ]]; then
             openapi_paths="$(jq -r '.paths | keys | join(", ")' "$RUNNER_TEMP/openapi.json" 2>/dev/null || echo "invalid schema")"
           fi
-          printf 'Observed endpoints: `/healthz` HTTP %s; `/api/v1/me` HTTP %s; `/openapi.json` HTTP %s; paths: %s\n' \
+          printf 'Observed endpoints: `/health` HTTP %s; `/api/v1/me` HTTP %s; `/openapi.json` HTTP %s; paths: %s\n' \
             "$health_status" "$identity_status" "$openapi_status" "$openapi_paths" | tee -a "$GITHUB_STEP_SUMMARY"
           if [[ "$health_ok" != "true" || "$identity_status" != "401" ]]; then
-            echo "::error::Unauthenticated checks returned /healthz HTTP ${health_status} (expected 200/status ok) and /api/v1/me HTTP ${identity_status} (expected 401)."
+            echo "::error::Unauthenticated checks returned /health HTTP ${health_status} (expected 200/status ok) and /api/v1/me HTTP ${identity_status} (expected 401)."
             exit 1
           fi
-          echo "Verified allUsers invoker, public /healthz (200), and protected /api/v1/me (401)."
+          echo "Verified allUsers invoker, public /health (200), and protected /api/v1/me (401)."
 
       - name: Set up Node.js
         if: env.DEPLOY_MODE == 'apply' && env.DEPLOY_TARGET == 'all'

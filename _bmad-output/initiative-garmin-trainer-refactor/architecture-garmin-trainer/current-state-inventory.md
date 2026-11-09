@@ -31,7 +31,7 @@ La conversation CLI est one-shot : l’historique des échanges n’est pas pers
 |---|---|---|
 | PWA | `web/` — React/TypeScript, Vite, Firebase JS SDK, `vite-plugin-pwa` | Écran de connexion/inscription et vérification d’e-mail ; pas encore d’écran de séance, de chat ou de feedback. |
 | Authentification client | `web/src/App.tsx`, `web/src/firebase.ts` | Firebase email/password ; après vérification, le client demande un Firebase ID token et appelle `/api/v1/me`. La configuration Firebase est fournie par variables `VITE_FIREBASE_*`. |
-| API | `api/app/main.py` — FastAPI | `GET /healthz` public et minimal ; `GET /api/v1/me` vérifie le Firebase ID token, exige un e-mail vérifié et applique `ALLOWED_USER_EMAIL`. Documentation OpenAPI désactivée. |
+| API | `api/app/main.py` — FastAPI | `GET /health` public et minimal ; `GET /api/v1/me` vérifie le Firebase ID token, exige un e-mail vérifié et applique `ALLOWED_USER_EMAIL`. Documentation OpenAPI désactivée. |
 | CORS | `api/app/main.py` | Origines provenant de `CORS_ALLOWED_ORIGINS`; en local, localhost:5173 par défaut. En production, Firebase Hosting relaie `/api/**`. |
 | Conteneur | `api/Dockerfile` | Python 3.13 slim, Uvicorn sur le port 8080, processus non-root (UID 10001). |
 | Tests | `api/tests/test_main.py` | 7 tests pour health, authentification requise, e-mail vérifié/autorisé et rejet de jetons ou d’identités invalides. |

@@ -146,6 +146,8 @@ def test_verify_mode_is_read_only_and_checks_the_live_api() -> None:
     verify = step("Verify public Cloud Run access and API authorization")
     assert "env.DEPLOY_MODE == 'verify'" in verify
     assert "for attempt in {1..10}" in verify
+    assert '"$api_url/health"' in verify
+    assert '"$api_url/healthz"' not in verify
     assert 'health_status" != "404"' in verify
     assert 'HTTP ${health_status}' in verify
     assert "Cloud Run URL:" in verify

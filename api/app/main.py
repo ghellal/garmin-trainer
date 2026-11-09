@@ -126,7 +126,7 @@ def get_current_user(
     return AuthenticatedUser(uid=uid, email=email)
 
 
-@app.get("/healthz", response_model=HealthResponse)
+@app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     """Unauthenticated liveness probe; returns no user or infrastructure data."""
     return HealthResponse(status="ok")

@@ -37,7 +37,7 @@ The Claude Agent SDK requires the [Claude Code CLI](https://docs.claude.com/en/d
 ## Web foundation (Phase 1)
 
 - `web/`: React/TypeScript PWA, Firebase email/password sign-in and email verification.
-- `api/`: FastAPI service. `/healthz` is a minimal liveness endpoint; `/api/v1/me` verifies Firebase ID tokens and only accepts the configured verified user email.
+- `api/`: FastAPI service. `/health` is a minimal liveness endpoint; `/api/v1/me` verifies Firebase ID tokens and only accepts the configured verified user email.
 - `infra/`: Terraform for Firebase Hosting/Auth, Firestore, Secret Manager, Artifact Registry and Cloud Run. See [infra/README.md](infra/README.md) for the bootstrap/apply sequence.
 - `.github/workflows/terraform-checks.yml`: API tests, PWA build, Terraform format and validation.
 - `.github/workflows/deploy.yml`: manual `workflow_dispatch` pipeline that applies Terraform and then deploys the API/PWA using WIF.

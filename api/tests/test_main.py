@@ -9,7 +9,7 @@ client = TestClient(app)
 
 
 def test_health_check_is_public_and_minimal() -> None:
-    response = client.get("/healthz")
+    response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}

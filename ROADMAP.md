@@ -36,7 +36,7 @@
 
 ### Travaux
 
-- [x] Initialiser la PWA React/TypeScript et l’API FastAPI ; définir `/healthz` et `/api/v1/me`.
+- [x] Initialiser la PWA React/TypeScript et l’API FastAPI ; définir `/health` et `/api/v1/me`.
 - [x] Créer le bucket GCS privé/versionné pour le state et écrire la configuration principale avec import des ressources WIF existantes.
 - [x] Décrire Firebase Hosting/Auth, Cloud Run, Firestore en `europe-west1`, Artifact Registry, Secret Manager, IAM et l’alerte de budget facultative dans Terraform.
 - [x] Mettre en place les workflows GitHub Actions de tests/validation et un pipeline `workflow_dispatch` WIF pour appliquer Terraform puis déployer l’application.

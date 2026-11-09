@@ -133,7 +133,7 @@ Pour chaque génération, le backend compose un contexte limité à partir de l�
 - Les règles de sécurité critiques ne doivent pas dépendre uniquement du prompt ou d’une décision probabiliste du modèle.
 - La séance est une proposition : l’utilisateur peut la refuser ou la modifier.
 - Les appels au modèle doivent recevoir le minimum de données nécessaire. Aucune clé API ne doit être exposée dans la PWA.
-- Cloud Run est joignable par Firebase Hosting pour le proxy `/api/**` ; chaque endpoint applicatif (hors `/healthz`) vérifie côté API le jeton Firebase et l’adresse e-mail vérifiée autorisée. L’invocation Cloud Run publique ne constitue pas l’autorisation applicative.
+- Cloud Run est joignable par Firebase Hosting pour le proxy `/api/**` ; chaque endpoint applicatif (hors `/health`) vérifie côté API le jeton Firebase et l’adresse e-mail vérifiée autorisée. L’invocation Cloud Run publique ne constitue pas l’autorisation applicative.
 - Les données Garmin, les retours et les conversations sont des données personnelles sensibles : chiffrement en transit, accès limité au compte utilisateur, secrets hors du code, suppression/export à prévoir.
 - Les modalités d’export/suppression et la revue des règles d’accès restent à tester avant mise en production.
 

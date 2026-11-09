@@ -71,7 +71,7 @@ and creates ignored backend configuration files on the ephemeral runner.
 Use `mode=verify,target=api` to recheck a live Cloud Run service without applying
 Terraform or rebuilding the image. This read-only mode reports the service URL,
 checks the `allUsers` invoker binding, retries transient health-check failures,
-and confirms that unauthenticated `/healthz` returns 200 while `/api/v1/me` still
+and confirms that unauthenticated `/health` returns 200 while `/api/v1/me` still
 returns 401.
 
 With `target=api`, a successful apply builds and pushes the existing `api/`
@@ -82,10 +82,10 @@ the Terraform roots before application deployment.
 
 The Cloud Run service has a public `allUsers` invoker binding to support its
 public entry points. This is not anonymous application authorization:
-`/healthz` is intentionally public and minimal, while FastAPI still verifies a
+`/health` is intentionally public and minimal, while FastAPI still verifies a
 Firebase ID token and the configured verified-email allowlist on every
 application route such as `/api/v1/me`. After API deployment, the workflow
-checks the invoker binding, verifies unauthenticated `/healthz` returns HTTP 200,
+checks the invoker binding, verifies unauthenticated `/health` returns HTTP 200,
 and verifies unauthenticated `/api/v1/me` returns HTTP 401.
 
 Never run `terraform apply` locally. Apply and deployment must use the protected
