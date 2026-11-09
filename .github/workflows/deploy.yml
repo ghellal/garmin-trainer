@@ -462,7 +462,7 @@ jobs:
               fi
               break
             fi
-            if [[ "$health_status" != "000" && "$health_status" != 5?? ]]; then
+            if [[ "$health_status" != "000" && "$health_status" != "404" && "$health_status" != 5?? ]]; then
               break
             fi
             sleep 5
