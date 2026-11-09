@@ -58,8 +58,8 @@ def test_apply_is_bound_to_reviewed_commit_and_plan_before_any_apply() -> None:
     for name in ("Plan bootstrap IAM", "Plan infrastructure"):
         fingerprint = step(name)
         assert "resource_changes: [.resource_changes[]?" in fingerprint
-        assert "before: .change.before" in fingerprint
         assert "after: .change.after" in fingerprint
+        assert ".change.before" not in fingerprint
         assert "output_changes: .output_changes" in fingerprint
         assert "checks: .checks" in fingerprint
     assert 'if [[ "$CONFIRM_DESTRUCTIVE" != "true" ]]' in step(

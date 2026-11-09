@@ -193,9 +193,7 @@ jobs:
               resource_changes: [.resource_changes[]? | {
                 address, mode, type, name, index, deposed,
                 actions: .change.actions,
-                before: .change.before,
                 after: .change.after,
-                before_sensitive: .change.before_sensitive,
                 after_sensitive: .change.after_sensitive,
                 after_unknown: .change.after_unknown,
                 importing: .change.importing
@@ -234,9 +232,7 @@ jobs:
               resource_changes: [.resource_changes[]? | {
                 address, mode, type, name, index, deposed,
                 actions: .change.actions,
-                before: .change.before,
                 after: .change.after,
-                before_sensitive: .change.before_sensitive,
                 after_sensitive: .change.after_sensitive,
                 after_unknown: .change.after_unknown,
                 importing: .change.importing

@@ -90,7 +90,7 @@ The `bootstrap-iam` target now plans/applies only the bootstrap IAM root and ski
 
 The first bootstrap-only plan showed sanitized resource actions, but manifest storage stopped because the bucket check used the wrong gcloud output-field name. The workflow now reads the documented `public_access_prevention` field and echoes sanitized resource actions into logs as well as the job summary; no manifest or IAM change was written by that failed plan run.
 
-Apply attempt `42537333213` stopped at the reviewed-fingerprint check; neither IAM nor application infrastructure was applied. The recomputed whole-plan JSON fingerprint differed, so fingerprints now cover a sorted projection of resource changes, planned before/after values (hashed only), output changes, and checks rather than unrelated plan metadata.
+Apply attempts `42537333213` (bootstrap) and `42538036619` (API) stopped at the reviewed-fingerprint check; neither attempt applied resources. The recomputed whole-plan JSON fingerprint differed, so fingerprints now cover a sorted projection of resource addresses/actions, planned after-values (hashed only), unknown/sensitive markers, imports, output changes, and checks while excluding refreshed before-state values.
 
 ## Plan Change Log
 
