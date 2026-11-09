@@ -60,7 +60,7 @@ jobs:
       TF_VAR_terraform_service_account_id: github-terraform
       TF_VAR_allowed_user_email: ${{ secrets.ALLOWED_USER_EMAIL }}
       TF_VAR_billing_account_id: ${{ vars.GCP_BILLING_ACCOUNT_ID }}
-      TF_VAR_monthly_budget_usd: ${{ vars.GCP_MONTHLY_BUDGET_USD || '6' }}
+      TF_VAR_monthly_budget_usd: ${{ vars.GCP_MONTHLY_BUDGET_AMOUNT || vars.GCP_MONTHLY_BUDGET_USD || '6' }}
       DEPLOY_MODE: ${{ inputs.mode }}
       DEPLOY_TARGET: ${{ inputs.target }}
       REVIEWED_PLAN_RUN_ID: ${{ inputs.reviewed_plan_run_id }}

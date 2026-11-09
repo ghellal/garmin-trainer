@@ -130,3 +130,13 @@ def test_bootstrap_grants_the_wif_pool_role_required_by_main_terraform() -> None
         / "main.tf"
     ).read_text(encoding="utf-8")
     assert '"roles/iam.workloadIdentityPoolAdmin"' in bootstrap_iam
+
+
+def test_budget_uses_billing_account_currency() -> None:
+    root = Path(__file__).resolve().parents[2]
+    main_tf = (root / "infra" / "main.tf").read_text(encoding="utf-8")
+
+    assert "units = tostring(var.monthly_budget_usd)" in main_tf
+    assert 'currency_code = "USD"' not in main_tf
+    assert "TF_VAR_monthly_budget_usd" in WORKFLOW
+    assert "GCP_MONTHLY_BUDGET_AMOUNT" in WORKFLOW

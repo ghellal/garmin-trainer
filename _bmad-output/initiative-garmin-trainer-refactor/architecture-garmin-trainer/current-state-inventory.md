@@ -63,7 +63,7 @@ Le compte ne peut pas s’accorder lui-même le premier `roles/resourcemanager.p
 - service Cloud Run `garmin-trainer-api`, min instances 0/max 1, 1 CPU/512 MiB, initialement sur l’image publique `hello`. Le workflow de release possède le cycle de vie de l’image ;
 - liaison `allUsers` invoker Cloud Run pour le proxy Hosting. Les routes applicatives restent protégées dans FastAPI par Firebase ID token et allowlist d’e-mail ;
 - pool/provider WIF GitHub et service account importés depuis le bootstrap ; la configuration source resserre l’identité à `workflow_dispatch`, l’environnement `production`, `main` et deux fichiers workflow ;
-- alerte mensuelle GCP facultative, 6 USD par défaut, notification seulement, non plafond de dépenses.
+- alerte mensuelle GCP facultative, seuil par défaut de 6 unités dans la devise du compte de facturation, notification seulement, non plafond de dépenses.
 
 `infra/FIRESTORE_SCHEMA.md` décrit des collections prévues (profils, objectifs, activités, mesures quotidiennes, séances, feedbacks, conversations et mémoire coach). C’est un schéma de référence : les endpoints et dépôts Firestore correspondants ne sont pas encore implémentés. `web/firestore.rules` refuse tout accès direct depuis le navigateur.
 

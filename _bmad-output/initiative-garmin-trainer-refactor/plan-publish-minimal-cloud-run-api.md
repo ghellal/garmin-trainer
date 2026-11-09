@@ -84,6 +84,8 @@ The deployment workflow is pushed to `main`; the bootstrap IAM apply completed. 
 
 Apply run `42651323812` applied bootstrap IAM successfully but failed during the main infrastructure apply; the API image and Cloud Run deployment steps were skipped. Terraform may have partially applied main-root changes. The detailed apply log was on the ephemeral runner, so the workflow now emits only a sanitized first error summary on apply failure; the next operation must be a fresh plan-only run to reconcile current state.
 
+Run `42652230010` then failed while creating the optional billing budget with HTTP 400 because the Terraform config forced `USD`, which can differ from the billing account's currency. The budget now omits an explicit currency code and interprets its threshold in the billing account's currency; `GCP_MONTHLY_BUDGET_AMOUNT` is the new name, with the old variable accepted as a compatibility alias. No API image was built or deployed.
+
 After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
 
 Plan-only run `42536352154` identified the missing `iam.workloadIdentityPools.get` permission while reading the imported WIF pool. The workflow now supports a bootstrap-only target, and `infra/bootstrap-iam` grants `roles/iam.workloadIdentityPoolAdmin`; the approved bootstrap IAM plan was applied successfully in run `42537682219`.

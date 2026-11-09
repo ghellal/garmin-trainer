@@ -74,12 +74,12 @@ variable "billing_account_id" {
 }
 
 variable "monthly_budget_usd" {
-  description = "GCP project-wide monthly budget threshold in USD; notifications only, not a spending cap."
+  description = "Legacy-named budget threshold amount in the billing account's currency; notifications only, not a spending cap."
   type        = number
   default     = 6
 
   validation {
     condition     = var.monthly_budget_usd > 0 && floor(var.monthly_budget_usd) == var.monthly_budget_usd
-    error_message = "monthly_budget_usd must be a positive whole-dollar amount."
+    error_message = "monthly_budget_usd must be a positive whole-currency-unit amount."
   }
 }

@@ -95,13 +95,16 @@ and are not wired into the bootstrap revision yet.
 Firebase Authentication uses email/password. A user can register, but the API
 only authorizes the configured, verified `allowed_user_email`. The pipeline
 expects `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_TERRAFORM_SERVICE_ACCOUNT`,
-`GCP_BILLING_ACCOUNT_ID`, and optionally `GCP_REGION`/`GCP_MONTHLY_BUDGET_USD`
-as GitHub Actions variables; `ALLOWED_USER_EMAIL` must be a GitHub Actions
-secret. The Firebase web config is read from Terraform outputs and is public
-client configuration. Never store the Garmin or LLM credentials in GitHub.
+and `GCP_BILLING_ACCOUNT_ID` as GitHub Actions variables. `GCP_REGION` and
+`GCP_MONTHLY_BUDGET_AMOUNT` are optional; the latter is expressed in the billing
+account's currency, with `GCP_MONTHLY_BUDGET_USD` accepted as a legacy alias.
+`ALLOWED_USER_EMAIL` must be a GitHub Actions secret. The Firebase web config is
+read from Terraform outputs and is public client configuration. Never store the
+Garmin or LLM credentials in GitHub.
 
-If enabled, the default USD 6/month budget is a project-wide notification only,
-not a spending cap. It covers all project usage, not compute alone.
+If enabled, the default 6-unit/month budget uses the billing account's currency.
+It is a project-wide notification only, not a spending cap, and covers all project
+usage, not compute alone.
 
 ## IAM and GitHub Actions status
 
