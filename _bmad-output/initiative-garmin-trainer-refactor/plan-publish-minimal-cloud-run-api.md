@@ -3,7 +3,7 @@ title: Publish the minimal authenticated API on Cloud Run
 type: feature
 ticket: ''
 created: '2026-11-09'
-status: in-progress
+status: built
 baseline_revision: 'b977d20806f975e5006f173dbc584aae305a1556'
 route: full
 route_source: auto
@@ -58,10 +58,10 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `.github/workflows/deploy.yml` -- store exact `.tfplan` files under the private GCS run prefix after verifying bucket public-access prevention; apply mode validates manifest commit/target/age, downloads and checksums the exact files, applies those bytes, deletes all versions after success, and deploys the API; `api` skips Hosting while `all` preserves current behavior.
+- [x] `.github/workflows/deploy.yml` -- store exact `.tfplan` files under the private GCS run prefix after verifying bucket public-access prevention; apply mode validates manifest commit/target/age, downloads and checksums the exact files, applies those bytes, deletes all versions after success, and deploys the API; `api` skips Hosting while `all` preserves current behavior.
 - [x] `infra/bootstrap-iam/main.tf` and `.github/workflows/deploy.yml` -- add the WIF pool admin permission and a `bootstrap-iam` target so its exact IAM plan can be reviewed/applied before the main root needs that permission.
 - [x] `api/tests/test_deploy_workflow.py` -- assert plan mode cannot apply, apply requires a same-commit/target manifest and matching checksums before Terraform apply, destructive actions require confirmation, bootstrap-only mode stops before the main root/API, and API-only mode skips Hosting; keep the public/protected route checks covered by `test_main.py`.
-- [ ] `.github/workflows/deploy.yml` -- after API deployment, read-only verify `allUsers` invoker, unauthenticated `/health` returns 200, and unauthenticated `/api/v1/me` returns 401. Do not print plan values or secret environment values.
+- [x] `.github/workflows/deploy.yml` -- after API deployment, read-only verify `allUsers` invoker, unauthenticated `/health` returns 200, and unauthenticated `/api/v1/me` returns 401. Do not print plan values or secret environment values.
 - [x] `infra/README.md` -- document the plan review and API-only dispatch, clarify that public Cloud Run invocation is not anonymous application authorization, and retain the no-local-apply rule.
 
 **Acceptance Criteria:**
@@ -76,11 +76,11 @@ context:
 
 The GitHub repository is public. The user approved temporarily storing exact Terraform plan files in the existing GCS state bucket, which enforces public access prevention. The workflow stores a manifest with commit/target/expiry and file checksums, but never logs or uploads plans to GitHub. Apply mode downloads and verifies the exact bytes before applying; on success it deletes all object versions for that run. Plans older than 24 hours are refused for apply. Runner temp paths are exported from a shell step rather than referenced from job-level expressions.
 
-Added workflow guard tests using the Python standard library and the existing API test suite. Bootstrap IAM and the main infrastructure apply completed; the API image was deployed, but the live health check failed and needs diagnosis.
+Added workflow guard tests using the Python standard library and the existing API test suite. The final API-only deployment and its live checks completed successfully.
 
-Local verification: API suite 13 passed; Terraform format check and validation passed for `infra`, `infra/bootstrap-iam`, and `infra/bootstrap-state`; workflow YAML parsed and all 19 multiline Bash steps passed `bash -n`; `git diff --check` passed.
+Local verification: API suite 15 passed; Terraform format check and validation passed for `infra`, `infra/bootstrap-iam`, and `infra/bootstrap-state`; workflow YAML parsed and all 19 multiline Bash steps passed `bash -n`; `git diff --check` passed.
 
-The deployment workflow is pushed to `main`; bootstrap IAM and main infrastructure apply completed, and the API image was deployed. The live public-health check failed; no PWA/Hosting deployment occurred. A read-only `mode=verify,target=api` path is being added to diagnose the service without another apply.
+The deployment workflow and health-path correction are pushed to `main`. Bootstrap IAM and main infrastructure are applied; the API image is live. The PWA/Hosting remains unpublished by design in this API-only release.
 
 Apply run `42651323812` applied bootstrap IAM successfully but failed during the main infrastructure apply; the API image and Cloud Run deployment steps were skipped. Terraform may have partially applied main-root changes. The detailed apply log was on the ephemeral runner, so the workflow now emits only a sanitized first error summary on apply failure; the next operation must be a fresh plan-only run to reconcile current state.
 
@@ -89,6 +89,8 @@ Run `42652230010` then failed while creating the optional billing budget with HT
 Apply run `42653745213` successfully applied the Terraform plan and deployed the API image, but Cloud Run returned its frontend 404 for `/healthz`; the invoker-policy check had passed. Read-only run `42655084780` confirmed `/api/v1/me` returns HTTP 401 and OpenAPI lists `/healthz`, while the direct health request still receives 404. The user approved replacing `/healthz` with `/health` because Cloud Run reserves `/healthz`; verification reports the URL/routes and never logs response bodies.
 
 Read-only verification run `42655084780` confirmed `/api/v1/me` returns HTTP 401 and OpenAPI advertises `/healthz`, while the direct `/healthz` request returned Google's frontend 404. The approved path change moves the health route and verification to `/health`.
+
+Deployment completed successfully in GitHub Actions run `42675905068`, using API image source commit `acfa072`. Cloud Run URL: `https://garmin-trainer-api-gmv75hxprq-ew.a.run.app`. The workflow verified `allUsers` invocation, unauthenticated `/health` HTTP 200, and unauthenticated `/api/v1/me` HTTP 401. The PWA/Hosting was intentionally not published in API-only mode. Plan objects from this successful run were deleted; abandoned plan objects from earlier failed runs remain private in the PAP-enforced GCS bucket pending cleanup.
 
 After the workflow commit was pushed, plan-only run `42536078311` failed in the main infrastructure planning step; apply and deployment steps did not run. Terraform diagnostics were intentionally suppressed, so the workflow now emits only a sanitized first error-summary line on a future plan failure, with the full log still confined to the ephemeral runner.
 

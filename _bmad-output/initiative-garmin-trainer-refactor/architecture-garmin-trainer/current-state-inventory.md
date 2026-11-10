@@ -83,16 +83,18 @@ flowchart LR
 ```
 
 - `.github/workflows/terraform-checks.yml` exécute les tests API, le build PWA et `terraform fmt`/`validate`; aucun accès GCP n’est accordé à ce workflow.
-- `.github/workflows/deploy.yml` est manuel (`workflow_dispatch`) sur `main` : configure le state, applique `infra/bootstrap-iam`, applique le root principal, construit/pousse l’image API, met à jour Cloud Run puis publie Hosting et les règles Firestore.
-- Le pipeline a besoin de GitHub variables `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_TERRAFORM_SERVICE_ACCOUNT`, `GCP_BILLING_ACCOUNT_ID`, ainsi que du secret `ALLOWED_USER_EMAIL`. `GCP_REGION` et `GCP_MONTHLY_BUDGET_USD` ont des valeurs par défaut.
+- `.github/workflows/deploy.yml` est manuel (`workflow_dispatch`) sur `main` : propose des modes plan/apply/vérification et des cibles bootstrap IAM/API/tout. Les plans Terraform sont stockés temporairement dans le bucket GCS privé, vérifiés par checksum, puis appliqués via GitHub Actions. La cible API déploie l’API sans publier Hosting ni les règles Firestore.
+- Le pipeline a besoin des variables GitHub `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_TERRAFORM_SERVICE_ACCOUNT`, `GCP_BILLING_ACCOUNT_ID` et du secret `ALLOWED_USER_EMAIL`. Le budget optionnel utilise `GCP_MONTHLY_BUDGET_AMOUNT` (alias historique : `GCP_MONTHLY_BUDGET_USD`) et un seuil par défaut de 6 unités dans la devise du compte.
 
 ## 5. État opérationnel observé
 
 - La clé Garmin Personal API a été testée sur l’endpoint d’échange : réponse HTTP 200 et jeton texte reçu puis jeté. Aucun endpoint de données Garmin n’a été appelé et aucun flux de données santé n’a été téléchargé.
-- Un apply Terraform local antérieur a créé une partie des ressources : Cloud Run avec image `hello`, Firestore, Artifact Registry, conteneurs de secrets, compte runtime, certaines API et liaisons IAM/WIF.
-- Un workflow GitHub récent s’est arrêté pendant l’authentification WIF à cause d’un nom de fournisseur contenant une barre oblique initiale en trop ; il n’a exécuté ni Terraform ni déploiement. La variable `GCP_WIF_PROVIDER` a ensuite été normalisée, mais aucun nouveau run n’a confirmé le succès.
-- Lors de la dernière vérification, les variables GitHub requises (`GCP_PROJECT_ID`, `GCP_REGION`, `GCP_TERRAFORM_SERVICE_ACCOUNT`, `GCP_WIF_PROVIDER`, `GCP_BILLING_ACCOUNT_ID`) et le secret `ALLOWED_USER_EMAIL` étaient présents. L’utilisateur indique que le blocage Firebase a été résolu, que le compte WIF possède Project IAM Admin et que l’exception organisationnelle `allUsers` est autorisée ; aucun apply réussi n’a encore confirmé l’état final.
-- L’inventaire ne lit ni `.env`, ni tfvars, ni état Terraform. L’état GCP courant n’a donc pas été revalidé dans ce document.
+- Un apply Terraform local antérieur avait créé une partie des ressources. Les workflows GitHub subséquents ont appliqué le bootstrap IAM et le root principal; le budget de notification a été créé en devise du compte de facturation.
+- La révision minimale FastAPI a été poussée sur Cloud Run via la cible API. L’URL publique observée est `https://garmin-trainer-api-gmv75hxprq-ew.a.run.app`. L’invocation `allUsers` a été vérifiée; `GET /health` répond HTTP 200 et `GET /api/v1/me` sans jeton répond HTTP 401. La connexion avec un jeton Firebase valide n’a pas été testée.
+- La PWA et les règles Firestore n’ont pas été publiées (cible API-only); la synchronisation Garmin, les données applicatives Firestore et le coaching web restent absents.
+- Les variables GitHub requises et le secret `ALLOWED_USER_EMAIL` étaient présents à la dernière vérification; le nom WIF a été normalisé et l’exception organisationnelle `allUsers` est déclarée autorisée.
+- Des fichiers de plan d’anciens essais ayant échoué restent dans le bucket GCS privé; ils ne sont pas publics et ne sont pas réutilisables après expiration ou changement d’état.
+- L’inventaire ne lit ni `.env`, ni tfvars, ni état Terraform. L’état ci-dessus est constaté depuis les résumés/contrôles des workflows et non par lecture locale de l’état.
 
 ## 6. Ce qui n’est pas encore en place dans le chemin web
 

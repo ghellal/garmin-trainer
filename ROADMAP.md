@@ -29,10 +29,11 @@
 
 ## Phase 1 — Fondations et sécurité
 
-> **État :** code de fondation prêt et validations locales passées. Le bootstrap
-> du state est fait et un apply principal a créé une partie des ressources, mais
-> Firebase/Hosting et l’invocation Cloud Run restent bloqués. Les prochains
-> applies doivent passer uniquement par le workflow GitHub manuel.
+> **État :** l’API FastAPI minimale est déployée sur Cloud Run via le workflow
+> GitHub manuel; l’invocation `allUsers` est configurée, `/health` répond 200 et
+> `/api/v1/me` non authentifié répond 401. La cible utilisée était API-only : la
+> PWA/Hosting n’a pas été publiée et aucun parcours de connexion Firebase valide
+> n’a encore été testé.
 
 ### Travaux
 
@@ -43,15 +44,17 @@
 - [x] Restreindre l’API à un jeton Firebase valide et à l’unique e-mail vérifié autorisé ; ne pas utiliser de clé JSON.
 - [x] Ajouter les règles Firestore deny-all côté navigateur, les origines CORS et les logs sans tokens/secrets.
 - [x] Décrire les collections Firestore et règles de conservation dans `infra/FIRESTORE_SCHEMA.md`.
-- [~] Apply principal partiel : Cloud Run (image hello), Firestore, Artifact Registry, secrets vides et IAM sont créés ; le run a échoué sur la création Firebase et la politique d’invoker public.
-- [ ] Configurer `allowed_user_email`, les variables GitHub et, si souhaité, `billing_account_id` ; tester l’inscription, la vérification e-mail et l’appel API sur GCP.
-- [ ] Configurer les permissions de provisionnement du compte WIF, déclencher le workflow manuel, puis confirmer les coûts réels.
+- [x] Appliquer les permissions de provisionnement WIF, puis l’infrastructure principale via le workflow GitHub avec plan revu et apply correspondant.
+- [x] Déployer l’image API minimale sur Cloud Run; vérifier l’invocation publique, `/health` HTTP 200 et `/api/v1/me` HTTP 401 sans jeton.
+- [x] Configurer l’allowlist, les variables/secrets GitHub et l’alerte de budget facultative (dans la devise du compte de facturation).
+- [ ] Publier Firebase Hosting/PWA et valider l’inscription, la vérification e-mail et un appel `/api/v1/me` avec un jeton valide.
+- [ ] Mesurer les coûts réels après usage; l’alerte de budget est informative et ne bloque pas les dépenses.
 
 ### Critères de sortie
 
-- Validations locales réussies : build PWA, tests API et `terraform validate` pour les deux configurations ; CI API est corrigée.
-- Restent à vérifier en GCP : Firebase/Auth/Hosting, règles Firestore, invoker Cloud Run, budget, compte utilisateur authentifié et déploiement de l’image API.
-- Les prochains applies doivent passer par le workflow manuel GitHub Actions. Le dispatch attend les permissions de provisionnement du compte WIF et la résolution de la politique d’organisation.
+- Validations locales réussies : build PWA, tests API et validation Terraform; l’API-only a été déployée et ses contrôles publics/protégés sont passés.
+- Restent à vérifier en GCP : connexion Firebase avec un jeton valide, déploiement Hosting/PWA et parcours complet côté navigateur.
+- Les prochains applies doivent passer par le workflow manuel GitHub Actions avec revue du plan exact; aucun `terraform apply` local.
 
 ## Phase 2 — Connecteur Garmin et qualité des données
 
